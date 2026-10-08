@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# claude-tmux — launch Claude Code inside a named tmux session so smartPanel can
+# see and manage it. Session names are prefixed "claude-" (the management
+# boundary smartPanel uses) and derived from the current directory unless -n is
+# given. Extra arguments are passed through to `claude`.
+#
+#   claude-tmux                 # session "claude-<cwd-basename>"
+#   claude-tmux -n review       # session "claude-review"
+#   claude-tmux --model opus    # extra args forwarded to claude
+set -euo pipefail
+
+PREFIX="claude-"
+name=""
+
+# Parse a leading "-n NAME"; everything else is forwarded to claude.
+if [[ "${1:-}" == "-n" ]]; then
+  name="${2:-}"
+  shift 2 || true
+fi
+
+if [[ -z "$name" ]]; then
+  name="$(basename "$PWD")"
+fi
+
+# tmux session names cannot contain "." or ":" and dislike whitespace.
+sanitize() { echo "$1" | tr -c 'A-Za-z0-9_-' '-' | sed -E 's/-+/-/g; s/^-|-$//g'; }
+base="${PREFIX}$(sanitize "$name")"
+
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "claude-tmux: tmux is not installed (sudo apt install tmux)" >&2
+  exit 1
+fi
+
+# Avoid clobbering an existing session of the same name: append -2, -3, ...
+session="$base"
+n=2
+while tmux has-session -t "=$session" 2>/dev/null; do
+  session="${base}-${n}"
+  n=$((n + 1))
+done
+
+# Permission mode for the session. smartPanel's journal-on-close types
+# `/journal` into the *live* session, so the skill inherits whatever mode the
+# session is in — in manual mode its git sweep and file write would sit on a
+# permission prompt nobody is watching, and the session would be closed with no
+# entry written. acceptEdits keeps that unattended path working.
+# Override with SMARTPANEL_CLAUDE_PERMISSION_MODE; set it empty to pass nothing.
+perm_mode="${SMARTPANEL_CLAUDE_PERMISSION_MODE-acceptEdits}"
+
+# Never override an explicit choice in the forwarded args.
+for arg in "$@"; do
+  case "$arg" in
+    --permission-mode|--permission-mode=*|--dangerously-skip-permissions)
+      perm_mode="" ;;
+  esac
+done
+
+claude_args=()
+if [[ -n "$perm_mode" ]]; then
+  claude_args+=(--permission-mode "$perm_mode")
+fi
+claude_args+=("$@")
+
+# Always create detached so the title options exist before a client attaches.
+tmux new-session -d -s "$session" claude "${claude_args[@]}"
+
+# Terminal window title, scoped to this session so the user's other tmux
+# sessions are untouched. This is only the starting value (the project): the
+# panel then keeps it identical to its dashboard label, "<Claude's conversation
+# title> — <project>", which a tmux format can't reproduce (glyph stripping,
+# placeholder titles).
+# Trailing ":" matters: set-option parses its target as a pane, and tmux 3.4
+# rejects a bare "=name" there ("no such session"), which aborts under set -e.
+tmux set-option -t "=$session:" set-titles on
+tmux set-option -t "=$session:" set-titles-string "${session#"$PREFIX"}"
+
+if [[ -n "${TMUX:-}" ]]; then
+  # Already inside tmux: switch the current client to the new session.
+  tmux switch-client -t "=$session"
+else
+  exec tmux attach-session -t "=$session"
+fi

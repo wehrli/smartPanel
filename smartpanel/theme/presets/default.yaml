@@ -1,0 +1,99 @@
+author: smartPanel
+display:
+  DISPLAY_ORIENTATION: portrait
+
+STATS:
+  CLAUDE:
+    COST_TODAY:
+      INTERVAL: 15
+      TEXT:  { SHOW: True }
+      LABEL: "Today"
+    TOKENS_TODAY:
+      INTERVAL: 15
+      TEXT:  { SHOW: True }
+      LABEL: "Tokens today"
+    COST_WEEK:
+      INTERVAL: 60
+      TEXT:  { SHOW: True }
+      LABEL: "This week"
+    COST_LIFETIME:
+      INTERVAL: 60
+      TEXT:  { SHOW: True }
+      LABEL: "Lifetime"
+    BURN_RATE:
+      INTERVAL: 30
+      TEXT:  { SHOW: True }
+      LABEL: "Burn rate"
+    CACHE_HIT_RATIO:
+      INTERVAL: 30
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      GRAPH: { SHOW: True, MIN_VALUE: 0, MAX_VALUE: 100 }
+      LABEL: "Cache hits"
+    SESSIONS_TODAY:
+      INTERVAL: 30
+      TEXT:  { SHOW: True }
+      LABEL: "Sessions today"
+    PRAISE_COST_LIFETIME:
+      INTERVAL: 60
+      TEXT:  { SHOW: True }
+      LABEL: "Gratification"
+    PER_PROJECT:
+      INTERVAL: 30
+      TEXT:  { SHOW: True }
+    BY_MODEL:
+      INTERVAL: 30
+      TEXT:  { SHOW: True }
+
+  CPU:
+    PERCENTAGE:
+      INTERVAL: 3
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      GRAPH: { SHOW: True, MIN_VALUE: 0, MAX_VALUE: 100 }
+      LABEL: "CPU"
+    TEMPERATURE:
+      INTERVAL: 5
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      LABEL: "CPU temp"
+
+  MEMORY:
+    PERCENTAGE:
+      INTERVAL: 5
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      GRAPH: { SHOW: True, MIN_VALUE: 0, MAX_VALUE: 100 }
+      LABEL: "Memory"
+
+  SWAP:
+    PERCENTAGE:
+      INTERVAL: 10
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      GRAPH: { SHOW: True, MIN_VALUE: 0, MAX_VALUE: 100 }
+      LABEL: "Swap"
+    USED:
+      INTERVAL: 10
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      LABEL: "Swap used"
+    TOTAL:
+      INTERVAL: 60
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      LABEL: "Swap total"
+
+  NET:
+    DOWNLOAD:
+      INTERVAL: 2
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      LABEL: "Network ↓"
+    UPLOAD:
+      INTERVAL: 2
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      LABEL: "Network ↑"
+
+smartpanel:
+  # {SWAP.STATUS} is the always-on swap gauge, and turns into the ⚠/🔴 alert
+  # in place. It leads because GNOME truncates the label from the right.
+  top_bar_format: "{SWAP.STATUS} · {SESSIONS.STATUS} · ${CLAUDE.COST_TODAY:,.2f} · {CLAUDE.TOKENS_TODAY_HUMAN}"
+  menu_order: [CLAUDE, CPU, MEMORY, SWAP, NET]
+  claude:
+    show_per_project: true
+    show_cost_estimate: true
+    cost_horizon: today
+    top_n_projects: 10

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smartpanel"
+version = "0.1.0"
+description = "System metrics + Claude Code consumption in your GNOME top bar"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Guillaume Wehrling" }]
+dependencies = [
+    "psutil>=5.9",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+nvidia = ["pynvml>=11.5"]
+dev = ["pytest>=7", "pytest-cov>=4"]
+
+[project.scripts]
+smartpanel = "smartpanel.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["smartpanel*"]
+
+[tool.setuptools.package-data]
+smartpanel = ["theme/presets/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

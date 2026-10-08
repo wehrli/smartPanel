@@ -1,0 +1,80 @@
+author: smartPanel
+display:
+  DISPLAY_ORIENTATION: portrait
+
+STATS:
+  CLAUDE:
+    COST_TODAY:
+      INTERVAL: 15
+      TEXT:  { SHOW: True }
+    COST_WEEK:
+      INTERVAL: 60
+      TEXT:  { SHOW: True }
+    COST_LIFETIME:
+      INTERVAL: 60
+      TEXT:  { SHOW: True }
+    TOKENS_TODAY:
+      INTERVAL: 15
+      TEXT:  { SHOW: True }
+    CACHE_HIT_RATIO:
+      INTERVAL: 30
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      GRAPH: { SHOW: True, MIN_VALUE: 0, MAX_VALUE: 100 }
+    PER_PROJECT:
+      INTERVAL: 30
+      TEXT:  { SHOW: True }
+    # Gratification — what "Good question" costs. See claude_stats/flattery.py.
+    PRAISE_PHRASES_TODAY:
+      INTERVAL: 30
+      TEXT:  { SHOW: True }
+      LABEL: "Compliments today"
+    PRAISE_COST_LIFETIME:
+      INTERVAL: 60
+      TEXT:  { SHOW: True }
+      LABEL: "Gratification"
+    PRAISE_SHARE:
+      INTERVAL: 60
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      LABEL: "Share of output"
+    PRAISE_SUMMARY:
+      INTERVAL: 60
+      TEXT:  { SHOW: True }
+    TOP_PRAISE:
+      INTERVAL: 60
+      TEXT:  { SHOW: True }
+
+  CPU:
+    PERCENTAGE:
+      INTERVAL: 3
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      GRAPH: { SHOW: True, MIN_VALUE: 0, MAX_VALUE: 100 }
+
+  MEMORY:
+    PERCENTAGE:
+      INTERVAL: 5
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      GRAPH: { SHOW: True, MIN_VALUE: 0, MAX_VALUE: 100 }
+
+  SWAP:
+    PERCENTAGE:
+      INTERVAL: 10
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      GRAPH: { SHOW: True, MIN_VALUE: 0, MAX_VALUE: 100 }
+      LABEL: "Swap"
+    USED:
+      INTERVAL: 10
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      LABEL: "Swap used"
+    TOTAL:
+      INTERVAL: 60
+      TEXT:  { SHOW: True, SHOW_UNIT: True }
+      LABEL: "Swap total"
+
+smartpanel:
+  top_bar_format: "{SWAP.STATUS} · {SESSIONS.STATUS} · ${CLAUDE.COST_TODAY:.2f} · ⚡{CPU.PERCENTAGE:.0f}%"
+  menu_order: [CLAUDE, CPU, MEMORY, SWAP]
+  claude:
+    show_per_project: true
+    show_cost_estimate: true
+    cost_horizon: today
+    top_n_projects: 10

@@ -1,0 +1,15 @@
+[Unit]
+Description=smartPanel — system + Claude metrics in the GNOME top bar
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@PYTHON@ -m smartpanel --theme default
+WorkingDirectory=@REPO@
+Restart=on-failure
+RestartSec=5
+@JOURNAL_ENV@
+
+[Install]
+WantedBy=graphical-session.target
