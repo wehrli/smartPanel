@@ -56,8 +56,9 @@ missing. Then it:
 - puts `smartpanel` and `claude-tmux` in `~/.local/bin`,
 - creates `~/.config/smartpanel/` (settings live in `config.yaml` there),
 - installs `~/.config/systemd/user/smartpanel.service` (runs `python3 -m smartpanel`),
-- installs a D-Bus service file for `dev.omdev.SmartPanel`, so `smartpanel --dashboard`,
-  `smartpanel --palette` and the HUD start the app through systemd when it isn't running,
+- installs a D-Bus service file for `dev.omdev.SmartPanel`, so `smartpanel`,
+  `smartpanel --dashboard`, `smartpanel --palette` and the HUD start the app through
+  systemd when it isn't running (never as a child of your shell),
 - turns journal-on-close off if you have no `/journal` skill in `~/.claude` (see below).
 
 Run it again after updating the folder. `./scripts/uninstall.sh` removes all of it and
@@ -311,7 +312,7 @@ clobber the shared log, and each stays up until its own entry is written.
 ## Command line
 
 ```
-smartpanel                      start (or, if running, open the dashboard)
+smartpanel                      open the dashboard (starting the service if needed)
 smartpanel --dashboard [PAGE]   open the dashboard on PAGE
 smartpanel --palette            open the command palette
 smartpanel --hud on|off|toggle  show or hide the desktop HUD
@@ -319,9 +320,14 @@ smartpanel --demo SCENARIO      run on simulated data
 smartpanel --theme NAME|PATH    theme preset or .yaml
 smartpanel --praise-report      print the gratification report and exit (no display)
 smartpanel --snapshot PAGE --out FILE.png [--demo S] [--style light|dark] [--size WxH]
+smartpanel --debug-timing [...]  log main-loop callbacks and stalls over 50 ms, report on exit
 ```
 
-A second `smartpanel …` is forwarded to the running instance.
+A second `smartpanel …` is forwarded to the running instance. `--demo`, `--snapshot`,
+`--praise-report`, `--theme` and `--debug-timing` always run in a process of their own;
+stop the service first (`systemctl --user stop smartpanel`) to use `--theme` or
+`--debug-timing` on the real app. `--debug-timing` is a launcher flag: from a source
+checkout use `python -m smartpanel.timing [args]`.
 
 ## License
 

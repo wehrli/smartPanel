@@ -96,6 +96,9 @@ fill() {
 BIN_DIR="$HOME/.local/bin"
 run mkdir -p "$BIN_DIR"
 run ln -sf "$SCRIPT_DIR/claude-tmux" "$BIN_DIR/claude-tmux"
+# Remove first: if ~/.local/bin/smartpanel is a symlink (e.g. to a venv's pip
+# console script), writing through it would overwrite that venv's entry point.
+run rm -f "$BIN_DIR/smartpanel"
 fill "$SCRIPT_DIR/smartpanel.in" | put "$BIN_DIR/smartpanel"
 run chmod +x "$BIN_DIR/smartpanel"
 case ":$PATH:" in

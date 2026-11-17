@@ -69,7 +69,57 @@ def test_launcher_and_service_commands(dry_run):
     assert "install-hud.sh" in out
 
 
-def test_launcher_template_activates_for_verbs_only():
+def test_launcher_is_written_fresh_not_through_a_symlink(dry_run):
+    home, out = dry_run
+    rm = out.index(f"+ rm -f {home}/.local/bin/smartpanel")
+    assert rm < out.index(f"+ write {home}/.local/bin/smartpanel:")
+
+
+@pytest.fixture
+def launcher(tmp_path):
+    """The filled launcher, with a fake gdbus / python that log their argv."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "log"
+    for name in ("gdbus", "fakepy"):
+        f = bindir / name
+        f.write_text(f'#!/bin/sh\necho "{name} $*" >> "{log}"\n', encoding="utf-8")
+        f.chmod(0o755)
     text = (ROOT / "scripts" / "smartpanel.in").read_text(encoding="utf-8")
-    assert "--dashboard|--dashboard=*|--palette|--hud|--hud=*)" in text
-    assert "org.freedesktop.DBus.Peer.Ping" in text
+    text = text.replace("@REPO@", str(ROOT)).replace("@PYTHON@", str(bindir / "fakepy"))
+    script = tmp_path / "smartpanel"
+    script.write_text(text, encoding="utf-8")
+    script.chmod(0o755)
+
+    def call(*args, env_extra=None):
+        if log.exists():
+            log.unlink()
+        env = {"PATH": f"{bindir}:/usr/bin:/bin", **(env_extra or {})}
+        subprocess.run([str(script), *args], env=env, check=True, timeout=30)
+        return log.read_text(encoding="utf-8").splitlines()
+    return call
+
+
+@pytest.mark.parametrize("args", [(), ("--dashboard",), ("--dashboard=spend",),
+                                  ("--palette",), ("--hud", "toggle"), ("-v",)])
+def test_launcher_activates_through_systemd_for_app_calls(launcher, args):
+    lines = launcher(*args)
+    assert lines[0].startswith("gdbus call --session --dest dev.omdev.SmartPanel")
+    assert "org.freedesktop.DBus.Peer.Ping" in lines[0]
+    assert lines[1] == " ".join(["fakepy -m smartpanel", *args])
+
+
+@pytest.mark.parametrize("args", [("--demo", "busy"), ("--snapshot", "overview"),
+                                  ("--praise-report",), ("-h",), ("--help",),
+                                  ("--theme", "claude-focus"), ("--gallery",)])
+def test_launcher_runs_local_only_calls_without_activation(launcher, args):
+    assert launcher(*args) == [" ".join(["fakepy -m smartpanel", *args])]
+
+
+def test_launcher_skips_activation_for_a_dev_app_id(launcher):
+    assert launcher(env_extra={"SMARTPANEL_APP_ID": "dev.omdev.SmartPanel.Dev"}) == \
+        ["fakepy -m smartpanel"]
+
+
+def test_launcher_debug_timing_runs_the_timing_entry_point(launcher):
+    assert launcher("--debug-timing", "-v") == ["fakepy -m smartpanel.timing --debug-timing -v"]
