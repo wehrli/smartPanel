@@ -31,12 +31,10 @@ breach visible instead of a vague stutter:
 
        main loop blocked ~120 ms (budget 50 ms; last timed callback: tray.Tray._paint)
 
-How to run it: `python -m smartpanel.timing [smartpanel args]` (or `smartpanel
---debug-timing ...` through the installed launcher) installs the hook first and
-then runs the normal CLI, and prints `report()` on exit. A `--debug-timing` flag
-on `smartpanel` itself needs a one-line hook in `app.py` (`timing.install()` at
-the top of `SmartPanelApp._wire`); until that lands, the module entry point is
-the way in.
+How to run it: `smartpanel --debug-timing ...` (`SmartPanelApp._wire` calls
+`install()` and the report is printed when the app shuts down), or
+`python -m smartpanel.timing [smartpanel args]`, which installs the hook before
+anything else (so startup itself is timed) and prints `report()` on exit.
 
 `stats()` keeps a per-callback count / total / worst so a profiling run can end
 with `timing.report()`. When nothing is installed and nothing is decorated, this

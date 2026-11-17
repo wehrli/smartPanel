@@ -507,3 +507,47 @@ def test_failed_start_exits_nonzero(monkeypatch, tmp_path):
     assert a.do_command_line(cl) == 1
     assert "failed to start: theme is garbled" in "".join(cl.err)
     assert not a._wired and not a._held
+
+
+def test_forwarded_palette_carries_activation_token(monkeypatch):
+    """A forwarded `smartpanel --palette` raises the palette with the launcher's
+    activation token from the command line's platform data."""
+    from gi.repository import GLib
+    from smartpanel import app as app_mod
+
+    class FakeCommandLine:
+        def get_arguments(self):
+            return ["smartpanel", "--palette"]
+
+        def get_is_remote(self):
+            return True
+
+        def get_platform_data(self):
+            return GLib.Variant("a{sv}", {
+                "activation-token": GLib.Variant("s", "wl-token-1")})
+
+        def printerr_literal(self, text):
+            raise AssertionError(text)
+
+    a = app_mod.SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
+    a._wired = True
+    seen = []
+    monkeypatch.setattr(a, "show_palette", lambda token=None: seen.append(token))
+    assert a.do_command_line(FakeCommandLine()) == 0
+    assert seen == ["wl-token-1"]
+
+
+def test_confirm_close_all_dialog_gets_event_data(monkeypatch):
+    from smartpanel import app as app_mod
+    from smartpanel.ui import session_dialogs
+    a = app_mod.SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
+
+    class FakeWindow:
+        def get_visible(self):
+            return True
+    monkeypatch.setattr(a, "ensure_window", lambda: FakeWindow())
+    got = {}
+    monkeypatch.setattr(session_dialogs, "confirm_close_all",
+                        lambda *args, data=None: got.update(data=data))
+    a._open_session_dialog("confirm_close_all", {"names": ["claude-a"]})
+    assert got["data"] == {"names": ["claude-a"]}

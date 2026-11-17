@@ -11,9 +11,6 @@
 - **Events** from the store become windows: `open_dashboard`, `open_palette`,
   `toast` (in-window, or a desktop notification when no window is showing),
   `confirm_close` / `confirm_close_all` / `new_session` (dialogs) and `quit`.
-
-GTK 3 modules (`indicator.py`, `dashboard.py`, `daemon.py`) are never imported here:
-PyGObject can't load GTK 3 and 4 in one process.
 """
 from __future__ import annotations
 
@@ -80,6 +77,16 @@ def _own_method(obj, name: str):
     return fn if callable(fn) else None
 
 
+def _platform_token(command_line) -> str | None:
+    """Activation token a forwarded command line carries, if any."""
+    try:
+        data = command_line.get_platform_data()
+        unpacked = data.unpack() if data is not None else {}
+    except Exception:  # noqa: BLE001 — a missing token only costs focus
+        return None
+    return cli.activation_token(unpacked)
+
+
 def _accepts_kwarg(cls, name: str) -> bool:
     try:
         return name in inspect.signature(cls).parameters
@@ -104,6 +111,7 @@ class SmartPanelApp(Adw.Application):
         self._wired = False
         self._held = False
         self._unsubs: list = []
+        self._timing = False
 
     # ───────────────────────── GApplication vfuncs ─────────────────────────
 
@@ -180,11 +188,20 @@ class SmartPanelApp(Adw.Application):
                     f"smartpanel: already running; {', '.join(ignored)} only applies "
                     f"at startup (restart the service to change it)\n")
 
+        token = _platform_token(command_line)
         for req in cli.requests_from(ns, remote=remote):
-            self._run_request(req)
+            self._run_request(req, token=token)
         return 0
 
     def do_shutdown(self) -> None:
+        if self._timing:
+            from smartpanel import timing
+            report = timing.report()
+            log.warning("main-loop timing report:\n%s", report)
+            import sys
+            print(report, file=sys.stderr)
+            timing.uninstall()
+            self._timing = False
         for unsub in self._unsubs:
             try:
                 unsub()
@@ -228,6 +245,10 @@ class SmartPanelApp(Adw.Application):
         from smartpanel.config import Config
         from smartpanel.theme.loader import load_theme
 
+        if getattr(ns, "debug_timing", False):
+            from smartpanel import timing
+            timing.install()
+            self._timing = True
         self.theme = load_theme(cli.resolve_theme(ns.theme))
         self.config = Config.load()
 
@@ -292,11 +313,11 @@ class SmartPanelApp(Adw.Application):
 
     # ───────────────────────── requests / events ─────────────────────────
 
-    def _run_request(self, req: cli.Request) -> None:
+    def _run_request(self, req: cli.Request, token: str | None = None) -> None:
         if req.verb == "dashboard":
             self.show_dashboard(req.arg)
         elif req.verb == "palette":
-            self.show_palette()
+            self.show_palette(token)
         elif req.verb == "hud":
             current = bool(self.config.get("hud.enabled")) if self.config else False
             self.actions.set_hud(cli.hud_target(req.arg, current))
@@ -323,11 +344,14 @@ class SmartPanelApp(Adw.Application):
     def show_dashboard(self, page: str = "") -> None:
         self.ensure_window().present_page(page)
 
-    def show_palette(self) -> None:
+    def show_palette(self, token: str | None = None) -> None:
         if self.palette is None:
             from smartpanel.ui.palette import PaletteWindow
             self.palette = PaletteWindow(self, self.store, self.actions, self.config)
-        self.palette.present()
+        if token:
+            self.palette.present(token)
+        else:
+            self.palette.present()
 
     def window_showing(self) -> bool:
         return self.window is not None and self.window.get_visible()
@@ -357,7 +381,7 @@ class SmartPanelApp(Adw.Application):
                                               str(data.get("name") or ""))
             elif kind == "confirm_close_all":
                 session_dialogs.confirm_close_all(window, self.store, self.actions,
-                                                  self.config)
+                                                  self.config, data=data)
             else:
                 session_dialogs.new_session(window, self.store, self.actions, self.config)
         except Exception:  # noqa: BLE001

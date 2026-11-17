@@ -71,6 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
                             + f" ('{GALLERY}' opens the widget gallery)")
     start.add_argument("--theme", default=None, metavar="NAME|PATH",
                        help="Theme preset name or path to a .yaml file (default: default)")
+    start.add_argument("--debug-timing", action="store_true",
+                       help="Log every main-loop callback over 50 ms and print a "
+                            "timing report on exit")
     tools = p.add_argument_group("one-shot tools (no running instance needed)")
     tools.add_argument("--praise-report", action="store_true",
                        help="Print the gratification report and exit. Needs no display.")
@@ -160,7 +163,22 @@ def ignored_when_remote(ns: argparse.Namespace) -> list[str]:
         out.append("--demo")
     if ns.theme:
         out.append("--theme")
+    if getattr(ns, "debug_timing", False):
+        out.append("--debug-timing")
     return out
+
+
+def activation_token(platform_data) -> str | None:
+    """The launcher's activation token from a forwarded command line's platform
+    data (`activation-token` on Wayland, `desktop-startup-id` on X11), so the
+    palette can be raised with focus instead of flashing "is ready"."""
+    if not isinstance(platform_data, dict):
+        return None
+    for key in ("activation-token", "desktop-startup-id"):
+        value = platform_data.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def resolve_theme(value: str | None) -> Path:

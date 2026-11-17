@@ -140,3 +140,19 @@ def test_cli_module_imports_without_gtk(tmp_path):
                                 "smartpanel.ui.charts, smartpanel.ui.tokens; "
                                 "sys.exit('gi.repository.Gtk' in sys.modules)")
     assert r.returncode == 0, r.stderr
+
+
+def test_debug_timing_flag_is_startup_only():
+    ns = cli.parse_args(["--debug-timing"])
+    assert ns.debug_timing
+    assert cli.ignored_when_remote(ns) == ["--debug-timing"]
+    assert not cli.parse_args([]).debug_timing
+
+
+def test_activation_token_from_platform_data():
+    assert cli.activation_token({"activation-token": "wl-123"}) == "wl-123"
+    assert cli.activation_token({"desktop-startup-id": "x11_TIME42"}) == "x11_TIME42"
+    assert cli.activation_token({"activation-token": "a", "desktop-startup-id": "b"}) == "a"
+    assert cli.activation_token({"activation-token": ""}) is None
+    assert cli.activation_token({}) is None
+    assert cli.activation_token(None) is None
