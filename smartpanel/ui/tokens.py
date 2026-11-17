@@ -42,7 +42,7 @@ PALETTES: dict[str, dict[str, str]] = {
         "fg": "#1e1e1e", "muted": "#5e5c64", "line": "rgba(0,0,0,0.10)",
         "btn": "#dedede", "sel": "rgba(0,0,0,0.07)",
         "wait": "#8a5a00", "run": "#1a64c0", "idle": "#5e5c64", "jour": "#813d9c",
-        "crit": "#c01c28", "ok": "#1b7a4c", "warn": "#8a5a00",
+        "crit": "#c01c28", "ok": "#16703f", "warn": "#8a5a00",
         "waitbg": "#fdf0d5",
         "accent": ACCENT, "accent_text": "#b83a0e",
         "banner_warn_bg": "#f6d32d", "banner_warn_fg": "#3d2c00",
