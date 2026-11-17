@@ -1,0 +1,118 @@
+{
+ "system": {
+  "cpu": {
+   "percent": null,
+   "temp_c": null,
+   "cores": 0,
+   "history": []
+  },
+  "memory": {
+   "percent": null,
+   "used_gb": null,
+   "total_gb": null,
+   "history": []
+  },
+  "swap": {
+   "percent": null,
+   "used_gb": null,
+   "total_gb": null,
+   "level": 0,
+   "warn_at": 60.0,
+   "crit_at": 85.0,
+   "history": []
+  },
+  "disk": {
+   "mount": "/",
+   "percent": null,
+   "used_gb": null,
+   "total_gb": null
+  },
+  "net": {
+   "down_bps": null,
+   "up_bps": null,
+   "iface": null,
+   "history_down": [],
+   "history_up": []
+  },
+  "gpu": {
+   "available": false,
+   "vendor": null,
+   "percent": null,
+   "vram_used_gb": null,
+   "vram_total_gb": null,
+   "temp_c": null,
+   "history": []
+  },
+  "updated_at": null
+ },
+ "spend": {
+  "cost_today": null,
+  "cost_week": null,
+  "cost_lifetime": null,
+  "tokens_today": 0,
+  "tokens_today_human": "",
+  "burn_per_hour": null,
+  "cache_hit_pct": null,
+  "hourly_today": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "projects_today": [],
+  "models_today": [],
+  "praise_cost_today": 0.0,
+  "praise_echo_today": 0.0,
+  "days": [],
+  "forecast": {
+   "budget_usd": null,
+   "pct": null,
+   "eta": null,
+   "eta_reason": null,
+   "over_by_usd": 0.0
+  },
+  "updated_at": null
+ },
+ "sessions": {
+  "items": [],
+  "tmux_ok": true,
+  "terminal_ok": true,
+  "updated_at": null
+ },
+ "journal": {
+  "entries": [],
+  "monthly_log_path": null
+ },
+ "app": {
+  "version": "",
+  "loading": null,
+  "first_run": false,
+  "demo": null,
+  "ticker_pinned": false,
+  "ticker_index": 0
+ },
+ "settings": {
+  "values": {},
+  "overridden_by": {}
+ }
+}

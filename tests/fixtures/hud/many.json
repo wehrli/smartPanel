@@ -1,0 +1,261 @@
+{
+ "system": {
+  "cpu": {
+   "percent": 23.4,
+   "temp_c": 61.0,
+   "cores": 16,
+   "history": [
+    20.0,
+    23.4
+   ]
+  },
+  "memory": {
+   "percent": 68.2,
+   "used_gb": 21.8,
+   "total_gb": 32.0,
+   "history": []
+  },
+  "swap": {
+   "percent": 93.0,
+   "used_gb": 7.44,
+   "total_gb": 8.0,
+   "level": 2,
+   "warn_at": 60.0,
+   "crit_at": 85.0,
+   "history": []
+  },
+  "disk": {
+   "mount": "/",
+   "percent": 54.0,
+   "used_gb": 250.0,
+   "total_gb": 465.0
+  },
+  "net": {
+   "down_bps": 45000.0,
+   "up_bps": 1000.0,
+   "iface": null,
+   "history_down": [],
+   "history_up": []
+  },
+  "gpu": {
+   "available": false,
+   "vendor": null,
+   "percent": null,
+   "vram_used_gb": null,
+   "vram_total_gb": null,
+   "temp_c": null,
+   "history": []
+  },
+  "updated_at": 1795430000.0
+ },
+ "spend": {
+  "cost_today": 23.84,
+  "cost_week": null,
+  "cost_lifetime": null,
+  "tokens_today": 41200000,
+  "tokens_today_human": "41.2M",
+  "burn_per_hour": 3.1,
+  "cache_hit_pct": null,
+  "hourly_today": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "projects_today": [],
+  "models_today": [],
+  "praise_cost_today": 0.0,
+  "praise_echo_today": 0.0,
+  "days": [],
+  "forecast": {
+   "budget_usd": null,
+   "pct": null,
+   "eta": null,
+   "eta_reason": null,
+   "over_by_usd": 0.0
+  },
+  "updated_at": 1795430000.0
+ },
+ "sessions": {
+  "items": [
+   {
+    "name": "claude-ledgerly",
+    "project": "ledgerly",
+    "title": "Migrate goose 0023",
+    "cwd": "/home/user/dev/ledgerly",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "idle",
+    "phase": "none",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-smartPanel",
+    "project": "smartPanel",
+    "title": "Fix swap alert hysteresis",
+    "cwd": "/home/user/dev/smartPanel",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "waiting",
+    "phase": "none",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-tacomap",
+    "project": "tacomap",
+    "title": "Truck search filters",
+    "cwd": "/home/user/dev/tacomap",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "running",
+    "phase": "none",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-JobScout",
+    "project": "JobScout",
+    "title": "Stripe webhook retries",
+    "cwd": "/home/user/dev/JobScout",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "running",
+    "phase": "none",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-tacomap-2",
+    "project": "tacomap",
+    "title": "Vendor onboarding copy",
+    "cwd": "/home/user/dev/tacomap",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "idle",
+    "phase": "none",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-ledgerly-2",
+    "project": "ledgerly",
+    "title": "Advisor dashboard filters",
+    "cwd": "/home/user/dev/ledgerly",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "running",
+    "phase": "journaling",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": {
+     "step": 2,
+     "failed": false,
+     "outcome": null
+    }
+   },
+   {
+    "name": "claude-wishlist",
+    "project": "wishlist",
+    "title": "Gift list sharing links",
+    "cwd": "/home/user/dev/wishlist",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "waiting",
+    "phase": "none",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-LeadPilot",
+    "project": "LeadPilot",
+    "title": "",
+    "cwd": "/home/user/dev/LeadPilot",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "idle",
+    "phase": "none",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-netConfigs",
+    "project": "",
+    "title": "",
+    "cwd": "/home/user/dev/",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "unknown",
+    "phase": "launching",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   }
+  ],
+  "tmux_ok": true,
+  "terminal_ok": true,
+  "updated_at": 1795430000.0
+ },
+ "app": {
+  "version": "2.0.0",
+  "loading": null,
+  "first_run": false,
+  "demo": null,
+  "ticker_pinned": false,
+  "ticker_index": 0
+ },
+ "settings": {
+  "values": {
+   "hud.enabled": true,
+   "hud.corner": "bottom-left",
+   "hud.margin": 48
+  },
+  "overridden_by": {}
+ }
+}

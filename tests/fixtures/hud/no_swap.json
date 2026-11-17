@@ -1,0 +1,191 @@
+{
+ "system": {
+  "cpu": {
+   "percent": 23.4,
+   "temp_c": 61.0,
+   "cores": 16,
+   "history": [
+    20.0,
+    23.4
+   ]
+  },
+  "memory": {
+   "percent": 68.2,
+   "used_gb": 21.8,
+   "total_gb": 32.0,
+   "history": []
+  },
+  "swap": {
+   "percent": null,
+   "used_gb": null,
+   "total_gb": 0.0,
+   "level": 1,
+   "warn_at": 60.0,
+   "crit_at": 85.0,
+   "history": []
+  },
+  "disk": {
+   "mount": "/",
+   "percent": 54.0,
+   "used_gb": 250.0,
+   "total_gb": 465.0
+  },
+  "net": {
+   "down_bps": 2400000.0,
+   "up_bps": 310000.0,
+   "iface": "wlp2s0",
+   "history_down": [],
+   "history_up": []
+  },
+  "gpu": {
+   "available": false,
+   "vendor": null,
+   "percent": null,
+   "vram_used_gb": null,
+   "vram_total_gb": null,
+   "temp_c": null,
+   "history": []
+  },
+  "updated_at": 1795430000.0
+ },
+ "spend": {
+  "cost_today": 23.84,
+  "cost_week": null,
+  "cost_lifetime": null,
+  "tokens_today": 41200000,
+  "tokens_today_human": "41.2M",
+  "burn_per_hour": 3.1,
+  "cache_hit_pct": null,
+  "hourly_today": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "projects_today": [],
+  "models_today": [],
+  "praise_cost_today": 0.0,
+  "praise_echo_today": 0.0,
+  "days": [],
+  "forecast": {
+   "budget_usd": null,
+   "pct": null,
+   "eta": null,
+   "eta_reason": null,
+   "over_by_usd": 0.0
+  },
+  "updated_at": 1795430000.0
+ },
+ "sessions": {
+  "items": [
+   {
+    "name": "claude-smartPanel",
+    "project": "smartPanel",
+    "title": "Fix swap alert hysteresis",
+    "cwd": "/home/user/dev/smartPanel",
+    "attached": true,
+    "created": 1795426400.0,
+    "activity": "waiting",
+    "phase": "none",
+    "doing": null,
+    "prompt": {
+     "question": "Do you want to make this edit to alerts.py?",
+     "options": [
+      "Yes",
+      "Yes, allow all edits this session",
+      "No, tell Claude what to do differently"
+     ],
+     "cursor": 0,
+     "kind": "permission",
+     "fingerprint": "abc123"
+    },
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-tacomap",
+    "project": "tacomap",
+    "title": "Truck search filters",
+    "cwd": "/home/user/dev/tacomap",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "running",
+    "phase": "none",
+    "doing": "Bash · npm test -- filters",
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-JobScout",
+    "project": "JobScout",
+    "title": "Stripe webhook retries",
+    "cwd": "/home/user/dev/JobScout",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "running",
+    "phase": "none",
+    "doing": "Waiting for 2 background agents",
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   },
+   {
+    "name": "claude-ledgerly",
+    "project": "ledgerly",
+    "title": "Migrate goose 0023",
+    "cwd": "/home/user/dev/ledgerly",
+    "attached": false,
+    "created": 1795426400.0,
+    "activity": "idle",
+    "phase": "none",
+    "doing": null,
+    "prompt": null,
+    "waiting_since": null,
+    "cost_usd": null,
+    "journal": null
+   }
+  ],
+  "tmux_ok": true,
+  "terminal_ok": true,
+  "updated_at": 1795430000.0
+ },
+ "app": {
+  "version": "2.0.0",
+  "loading": null,
+  "first_run": false,
+  "demo": null,
+  "ticker_pinned": false,
+  "ticker_index": 0
+ },
+ "settings": {
+  "values": {
+   "hud.enabled": true,
+   "hud.corner": "top-right"
+  },
+  "overridden_by": {}
+ }
+}
