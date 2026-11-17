@@ -262,3 +262,14 @@ def test_journal_open_goes_through_actions_open_path(tmp_path):
     store.mutate("journal", lambda j: setattr(j.entries[0], "path", str(receipt)))
     page.detail.open_receipt.emit("clicked")
     assert ("open_path", (str(receipt),)) in page.actions.calls
+
+
+def test_spend_receipt_time_comes_from_state_not_the_wall_clock():
+    from smartpanel.demo import DEMO_NOW
+    from smartpanel.ui.pages import spend
+    store = Store(build_state("busy", now=DEMO_NOW))       # the prototype's 14:32
+    page = spend.build(store, RecordingActions(), FakeConfig())
+    assert page.receipt._model.date_line.endswith("· 14:32")
+    later = DEMO_NOW + 3 * 60
+    store.update("spend", updated_at=later)
+    assert page.receipt._model.date_line.endswith("· 14:35")
