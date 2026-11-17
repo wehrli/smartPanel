@@ -1,156 +1,219 @@
+"""smartpanel command line (SP-0011).
+
+    smartpanel                      start the panel (or, if running, open the dashboard)
+    smartpanel --dashboard [PAGE]   open the dashboard on PAGE (sessions:board, journal:<id>)
+    smartpanel --palette            open the command palette
+    smartpanel --hud on|off|toggle  show / hide the desktop HUD
+    smartpanel --demo SCENARIO      run on simulated data (busy, calm, alert, …)
+    smartpanel --theme NAME|PATH    metric theme (preset name or .yaml path)
+    smartpanel --praise-report      print the gratification report (no GTK, works over SSH)
+    smartpanel --snapshot PAGE --out FILE.png [--demo busy]   render a page to PNG
+    smartpanel --gallery [--demo busy]                        widget kit gallery
+
+Single instance comes from Gio.Application (`HANDLES_COMMAND_LINE`): a second
+invocation forwards its arguments to the running instance and exits with that
+instance's status. Arguments are validated *here*, in the invoking process, so a
+typo prints usage locally instead of reaching (and never killing) the service.
+
+Everything above `main()` is GTK-free and unit-tested.
+"""
 from __future__ import annotations
 
 import argparse
 import logging
-import signal
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-
-from smartpanel.theme.loader import load_theme
 
 log = logging.getLogger("smartpanel")
 
+SCENARIOS = ("busy", "calm", "alert", "empty", "many", "cold", "first", "notmux", "noswap")
+HUD_CHOICES = ("on", "off", "toggle")
+SNAPSHOT_TARGETS = ("window", "gallery")   # plus every page / page:detail
 
-def _resolve_theme(value: str) -> Path:
-    p = Path(value)
+
+class CliError(Exception):
+    """Bad arguments. Carries the usage-prefixed message; exit status 2."""
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str):  # never sys.exit inside the running service
+        raise CliError(f"{self.format_usage()}{self.prog}: error: {message}")
+
+    def exit(self, status: int = 0, message: str | None = None):
+        raise CliError(message or "")
+
+
+def _scenarios() -> tuple[str, ...]:
+    try:
+        from smartpanel.demo import SCENARIOS as live
+        return tuple(live)
+    except Exception:  # noqa: BLE001 — demo package broken mid-wave: keep the CLI usable
+        return SCENARIOS
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = _Parser(prog="smartpanel", add_help=False,
+                description="System metrics, Claude Code spend and session control "
+                            "for the GNOME panel.")
+    p.add_argument("-h", "--help", action="store_true", help="Show this help and exit")
+    verbs = p.add_argument_group("verbs (forwarded to the running instance)")
+    verbs.add_argument("--dashboard", nargs="?", const="", default=None, metavar="PAGE",
+                       help="Open the dashboard, optionally on PAGE "
+                            "(overview, sessions, sessions:board, spend, system, "
+                            "journal, journal:<id>, settings)")
+    verbs.add_argument("--palette", action="store_true", help="Open the command palette")
+    verbs.add_argument("--hud", choices=HUD_CHOICES, help="Show, hide or toggle the desktop HUD")
+    start = p.add_argument_group("startup (first instance only)")
+    start.add_argument("--demo", choices=_scenarios(), metavar="SCENARIO",
+                       help="Run on simulated data: " + ", ".join(_scenarios()))
+    start.add_argument("--theme", default=None, metavar="NAME|PATH",
+                       help="Theme preset name or path to a .yaml file (default: default)")
+    tools = p.add_argument_group("one-shot tools (no running instance needed)")
+    tools.add_argument("--praise-report", action="store_true",
+                       help="Print the gratification report and exit. Needs no display.")
+    tools.add_argument("--snapshot", metavar="PAGE",
+                       help="Render PAGE (a page, page:detail, 'window' or 'gallery') "
+                            "offscreen to --out and exit")
+    tools.add_argument("--out", metavar="FILE.png", help="Output file for --snapshot")
+    tools.add_argument("--size", default="900x680", metavar="WxH",
+                       help="Window size for --snapshot (default 900x680)")
+    tools.add_argument("--style", choices=("light", "dark"),
+                       help="Force light or dark for --snapshot / --gallery")
+    tools.add_argument("--on-display", action="store_true",
+                       help="--snapshot on the current display instead of a private "
+                            "headless one")
+    tools.add_argument("--gallery", action="store_true",
+                       help="Open a window showing every widget of the kit")
+    p.add_argument("--verbose", "-v", action="store_true")
+    p.add_argument("--debug", action="store_true")
+    return p
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse and cross-validate. Raises CliError; never exits."""
+    ns = build_parser().parse_args(argv)
+    if ns.help:
+        return ns
+    if ns.snapshot is not None and not ns.out:
+        raise CliError("smartpanel: error: --snapshot needs --out FILE.png")
+    if ns.out and ns.snapshot is None:
+        raise CliError("smartpanel: error: --out only goes with --snapshot")
+    if ns.snapshot is not None:
+        parse_size(ns.size)
+    return ns
+
+
+def parse_size(text: str) -> tuple[int, int]:
+    try:
+        w, h = (int(x) for x in text.lower().split("x"))
+    except ValueError:
+        raise CliError(f"smartpanel: error: --size must look like 900x680, not {text!r}")
+    if not (200 <= w <= 8000 and 200 <= h <= 8000):
+        raise CliError("smartpanel: error: --size out of range (200..8000)")
+    return w, h
+
+
+def log_level(ns: argparse.Namespace) -> int:
+    return logging.DEBUG if ns.debug else (logging.INFO if ns.verbose else logging.WARNING)
+
+
+@dataclass(frozen=True)
+class Request:
+    """One thing a command line asks the running instance to do."""
+    verb: str            # "dashboard" | "palette" | "hud"
+    arg: str = ""
+
+
+def requests_from(ns: argparse.Namespace, *, remote: bool) -> list[Request]:
+    """What to do for this invocation, in order.
+
+    A bare `smartpanel` sent to an already-running instance opens the dashboard
+    (the usual "launching an app again shows its window"); on first start it
+    just starts the service.
+    """
+    out: list[Request] = []
+    if ns.dashboard is not None:
+        out.append(Request("dashboard", ns.dashboard))
+    if ns.palette:
+        out.append(Request("palette"))
+    if ns.hud:
+        out.append(Request("hud", ns.hud))
+    if not out and remote:
+        out.append(Request("dashboard", ""))
+    return out
+
+
+def hud_target(arg: str, current: bool) -> bool:
+    return {"on": True, "off": False}.get(arg, not current)
+
+
+def ignored_when_remote(ns: argparse.Namespace) -> list[str]:
+    """Startup-only options a second invocation can't apply."""
+    out = []
+    if ns.demo:
+        out.append("--demo")
+    if ns.theme:
+        out.append("--theme")
+    return out
+
+
+def resolve_theme(value: str | None) -> Path:
+    value = value or "default"
+    p = Path(value).expanduser()
     if p.exists():
         return p
     preset = Path(__file__).parent / "theme" / "presets" / f"{value}.yaml"
     if preset.exists():
         return preset
-    raise SystemExit(f"smartpanel: theme not found: {value}")
+    raise CliError(f"smartpanel: theme not found: {value}")
 
+
+# ───────────────────────── entry point ─────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="smartpanel", description=__doc__)
-    parser.add_argument("--theme", default="default",
-                        help="Theme preset name or path to a .yaml file")
-    parser.add_argument("--praise-report", action="store_true",
-                        help="Print the gratification report (what compliments cost) "
-                             "and exit. Needs no display server.")
-    parser.add_argument("--verbose", "-v", action="store_true")
-    parser.add_argument("--debug", action="store_true")
-    args = parser.parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    try:
+        ns = parse_args(argv)
+        if ns.theme:
+            resolve_theme(ns.theme)
+    except CliError as e:
+        msg = str(e)
+        if msg:
+            print(msg, file=sys.stderr)
+        return 2
+    if ns.help:
+        build_parser().print_help()
+        return 0
 
-    level = logging.DEBUG if args.debug else (logging.INFO if args.verbose else logging.WARNING)
-    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(level=log_level(ns), format="%(levelname)s %(name)s: %(message)s")
 
-    if args.praise_report:
-        # Deliberately before the theme + GTK work: this path is usable over SSH.
+    if ns.praise_report:
+        # Before any GTK import: this path must work over SSH.
         from smartpanel.claude_stats.aggregator import Aggregator
         from smartpanel.claude_stats.report import praise_report
         print(praise_report(Aggregator().refresh()))
         return 0
 
-    theme_path = _resolve_theme(args.theme)
-    theme = load_theme(theme_path)
-    log.info("loaded theme %s (%d metrics)", theme_path.name, len(theme.metrics))
+    if ns.snapshot is not None:
+        from smartpanel.ui.snapshot import run_snapshot_cli
+        return run_snapshot_cli(ns)
 
-    # Import GTK only here so that --help and tests don't require a display.
     try:
         import gi
-        gi.require_version("Gtk", "3.0")
-        gi.require_version("AyatanaAppIndicator3", "0.1")
-        from gi.repository import Gtk, GLib  # noqa: F401
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw, Gtk  # noqa: F401
     except (ImportError, ValueError) as e:
-        print(f"smartpanel: missing GTK / AppIndicator bindings: {e}", file=sys.stderr)
-        print("Install: sudo apt install python3-gi gir1.2-gtk-3.0 "
-              "gir1.2-ayatanaappindicator3-0.1", file=sys.stderr)
+        print(f"smartpanel: missing GTK 4 / libadwaita bindings: {e}", file=sys.stderr)
+        print("Install: sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1",
+              file=sys.stderr)
         return 2
 
-    from smartpanel.daemon import Daemon
-    from smartpanel.indicator import Indicator
-    from smartpanel.sensors import sessions as sessions_sensor
-    from smartpanel.sessions import activity, focus, tmux
-    from smartpanel.uiformat import session_heading, sessions_status
+    if ns.gallery:
+        from smartpanel.ui.gallery import run_gallery
+        return run_gallery(ns)
 
-    indicator = Indicator(theme)
-    daemon = Daemon(theme, indicator)
-    daemon.start()
-
-    # Interactive Sessions submenu: refresh on its own timer, independent of the
-    # theme. tmux list/kill are fast local calls, fine on the main loop here;
-    # the slow path (journal generation) lands in a later slice and must go
-    # off-loop. Kills bust the sensor cache so the top-bar count updates too.
-    # Terminal title last pushed per session, so a tick only talks to tmux when
-    # a heading actually changed. Recorded even if the push failed, so a broken
-    # session logs once instead of every 2s; its ⟳ button retries.
-    pushed_titles: dict[str, str] = {}
-
-    def sync_terminal_titles(live) -> None:
-        alive = {s.name for s in live}
-        for name in [n for n in pushed_titles if n not in alive]:
-            del pushed_titles[name]
-        for s in live:
-            heading = session_heading(s)
-            if pushed_titles.get(s.name) != heading:
-                tmux.set_terminal_title(s.name, heading)
-                pushed_titles[s.name] = heading
-
-    def refresh_sessions() -> bool:
-        # `annotate` costs one capture-pane per session (~2.4ms) on top of the
-        # single list-sessions call — a handful of ms per tick, inside the
-        # main-loop budget, and the only way to see a session that is blocked on
-        # a permission prompt (see sessions/activity.py).
-        live = activity.annotate(tmux.list_sessions())
-        sync_terminal_titles(live)
-        indicator.update_sessions(live, on_close=close_one, on_close_all=close_all,
-                                  on_refresh=refresh_one, on_focus=focus_one)
-        # Feed the top bar too, so `{SESSIONS.COUNT}` works without the category
-        # being a theme metric. update() iterates this category's metrics (none)
-        # then refreshes the top-bar label from self.values.
-        names = ", ".join(s.project for s in live) if live else "—"
-        tally = activity.counts(live)
-        indicator.update("SESSIONS", {
-            "COUNT": float(len(live)),
-            "NAMES": names,
-            "STATUS": sessions_status(live),
-            "WAITING": float(tally[activity.WAITING]),
-            "RUNNING": float(tally[activity.RUNNING]),
-        })
-        return True
-
-    def focus_one(name: str) -> None:
-        """Clicking a session row: bring its terminal forward.
-
-        The title is the handle the window managers match on, and it is exactly
-        what `sync_terminal_titles` pushed, so the two can never drift.
-        """
-        match = next((s for s in tmux.list_sessions() if s.name == name), None)
-        title = session_heading(match) if match else name
-        result = focus.focus_session(name, title)
-        if result == focus.REATTACHED:
-            # The old window is gone with its client; pick the new title up on
-            # the next tick rather than leaving a stale entry behind.
-            pushed_titles.pop(name, None)
-        elif result == focus.FAILED:
-            log.warning("no way to focus %s on this desktop; see focus.py", name)
-
-    def refresh_one(name: str) -> None:
-        """⟳ button: re-read the session from tmux and re-push its title."""
-        pushed_titles.pop(name, None)
-        refresh_sessions()
-
-    def close_one(name: str) -> None:
-        tmux.kill_session(name)
-        sessions_sensor.invalidate()
-        refresh_sessions()
-
-    def close_all() -> None:
-        n = tmux.kill_all()
-        log.info("closed %d session(s)", n)
-        sessions_sensor.invalidate()
-        refresh_sessions()
-
-    refresh_sessions()
-    sessions_timer = GLib.timeout_add_seconds(2, refresh_sessions)
-
-    signal.signal(signal.SIGINT, lambda *_: Gtk.main_quit())
-    signal.signal(signal.SIGTERM, lambda *_: Gtk.main_quit())
-
-    try:
-        Gtk.main()
-    finally:
-        GLib.source_remove(sessions_timer)
-        daemon.stop()
-    return 0
+    from smartpanel.app import SmartPanelApp
+    app = SmartPanelApp()
+    return app.run([sys.argv[0] if sys.argv else "smartpanel", *argv])
