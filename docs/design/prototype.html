@@ -1,0 +1,826 @@
+<title>smartPanel Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu+Sans:wght@300;400;500;600;700&family=Ubuntu+Sans+Mono:wght@400;500;700&display=swap">
+<style>
+/* Layout: a working prototype. Left = scaled Ubuntu desktop (fixed 1200x740 artboard, its own dark world).
+   Right = prototype control panel (page tokens, theme-aware). */
+:root{
+  --bg:#eeeaec; --surface:#ffffff; --fg:#241c21; --muted:#6c5f66; --line:#ddd5da; --accent:#e95420; --chip:#f6f2f4;
+  --sans:"Ubuntu Sans","Ubuntu",system-ui,sans-serif;
+  --mono:"Ubuntu Sans Mono","Ubuntu Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#191417;--surface:#241d21;--fg:#efe9ec;--muted:#a6979e;--line:#3a3035;--chip:#2e262a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#191417;--surface:#241d21;--fg:#efe9ec;--muted:#a6979e;--line:#3a3035;--chip:#2e262a;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+button{font:inherit;color:inherit}
+.page{max-width:1640px;margin:0 auto;display:grid;gap:20px}
+.phead{display:flex;flex-wrap:wrap;gap:10px 28px;align-items:end;justify-content:space-between}
+.phead h1{margin:0;font-size:clamp(24px,3vw,32px);font-weight:600;line-height:1.1}
+.phead p{margin:4px 0 0;color:var(--muted);max-width:80ch}
+.eyebrow{font:500 11.5px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.picks{display:flex;flex-wrap:wrap;gap:6px}
+.picks span{font:500 11.5px/1 var(--sans);padding:5px 9px;border-radius:99px;background:var(--chip);border:1px solid var(--line);white-space:nowrap}
+.picks em{font-style:normal;font-family:var(--mono);color:var(--accent);margin-right:4px}
+.app{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
+@media (max-width:1060px){.app{grid-template-columns:1fr}}
+.hint{color:var(--muted);font-size:12.5px;margin-top:8px;display:flex;flex-wrap:wrap;gap:4px 16px}
+.hint kbd{font:500 11px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:var(--surface)}
+#stage{position:relative;width:100%;border-radius:12px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.18);background:#22091f}
+
+/* ───────── control panel ───────── */
+#ctl{background:var(--surface);border:1px solid var(--line);border-radius:12px;position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto}
+@media (max-width:1060px){#ctl{position:static;max-height:none}}
+#ctl section{padding:14px 16px;border-bottom:1px solid var(--line);display:grid;gap:8px}
+#ctl section:last-child{border-bottom:0}
+#ctl h3{margin:0;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600;display:flex;justify-content:space-between}
+#ctl .desc{margin:0;font-size:12.5px;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{border:1px solid var(--line);background:var(--chip);border-radius:99px;padding:5px 10px;font-size:12px;cursor:pointer}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip:focus-visible,.cbtn:focus-visible,#ctl select:focus-visible,#ctl input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sl{display:grid;grid-template-columns:78px 1fr 52px;align-items:center;gap:8px;font-size:12.5px}
+.sl input{width:100%;accent-color:var(--accent)}
+.sl output{font:500 12px var(--mono);text-align:right}
+.tg{display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer}
+.tg input{accent-color:var(--accent);width:15px;height:15px;margin:0}
+.tg small{font-family:var(--mono);color:var(--accent);margin-left:auto}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.cbtn{border:1px solid var(--line);background:var(--chip);border-radius:8px;padding:6px 9px;font-size:12px;cursor:pointer;text-align:left}
+.cbtn:hover,.chip:hover{border-color:var(--accent)}
+.cs{display:grid;grid-template-columns:96px 1fr 26px;gap:6px;align-items:center;font-size:12px}
+.cs span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cs select,#ctl select{font:inherit;font-size:12px;border:1px solid var(--line);background:var(--chip);color:var(--fg);border-radius:6px;padding:3px 4px}
+.cs button{border:1px solid var(--line);background:var(--chip);border-radius:6px;cursor:pointer;height:24px}
+.scr{display:grid;gap:4px}
+.scr b{font-size:11.5px;color:var(--fg);font-weight:600;margin-top:4px}
+.fieldrow{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.fieldrow select{flex:1}
+
+/* ───────── desktop artboard (fixed Ubuntu dark world) ───────── */
+#desk{position:absolute;left:0;top:0;width:1200px;height:740px;transform-origin:0 0;overflow:hidden;color:#fff;font-family:var(--sans);font-size:13px;
+  background:radial-gradient(110% 90% at 88% 112%,#e95420 0%,#a3285a 33%,#3b1236 68%,#1c0619 100%)}
+#desk button{background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+#desk button:disabled{cursor:not-allowed;opacity:.45}
+#desk :focus-visible{outline:2px solid #e95420;outline-offset:1px}
+.ico{width:14px;height:14px;display:inline-block;vertical-align:-2px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:var(--mono);font-size:12.5px}
+.am{color:#f6b73c}.rd{color:#ff7b7b}.gr{color:#9a9a9a}
+.topbar{position:absolute;inset:0 0 auto 0;height:30px;background:#000;display:flex;align-items:center;justify-content:space-between;padding:0 8px;font-weight:500;z-index:30}
+.ws{display:flex;gap:5px;align-items:center;padding:4px 10px}
+.ws b{width:24px;height:7px;border-radius:9px;background:#fff;display:block}
+.ws s{width:7px;height:7px;border-radius:50%;background:#888;display:block}
+.clock{position:absolute;left:50%;transform:translateX(-50%);white-space:nowrap}
+.tray{display:flex;align-items:center;gap:3px}
+#desk .ind{height:24px;padding:0 11px;border-radius:99px;display:flex;align-items:center;gap:8px;white-space:nowrap;font-variant-numeric:tabular-nums;color:#fff;font-weight:500}
+#desk .ind:hover{background:rgba(255,255,255,.1)}
+#desk .ind.on{background:rgba(255,255,255,.2)}
+.sys{display:flex;gap:10px;padding:3px 10px;align-items:center}
+.sys svg{width:14px;height:14px;fill:#fff}
+.strip{display:flex;gap:2px;align-items:center}
+.strip i{width:7px;height:14px;border-radius:2px;display:block;position:relative}
+.t-waiting{background:#f5a623}.t-waiting::after{content:"";position:absolute;left:2px;top:-4px;width:3px;height:3px;border-radius:50%;background:#f5a623}
+.t-running{background:#62a0ea}.t-idle{background:#5e5e5e}.t-launching{background:transparent;box-shadow:inset 0 0 0 1.5px #9a9a9a}.t-journaling{background:#c061cb}
+.strip b{font-size:11px;color:#bbb;margin-left:2px;font-weight:500}
+.vb{display:flex;align-items:flex-end;gap:1px;height:16px}
+.vb i{width:3px;background:#e95420;display:block;border-radius:1px}
+.meters{display:flex;gap:2px}
+.meter{width:5px;height:16px;background:#444;border-radius:2px;position:relative;overflow:hidden;display:block}
+.meter i{position:absolute;inset:auto 0 0 0;background:#fff;display:block}
+.meter.swp i{background:#bdbdbd}.meter.m-warn i{background:#f5a623}.meter.m-crit i{background:#e01b24}
+.dots{font-size:7px;letter-spacing:1px;color:#aaa}
+.ind small{font-size:11px;color:#bbb;font-weight:400}
+.spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;display:inline-block;animation:sp 0.9s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin,.sk,.blink{animation:none!important}}
+.dock{position:absolute;left:0;top:30px;bottom:0;width:52px;background:rgba(18,6,16,.55);display:flex;flex-direction:column;align-items:center;gap:9px;padding-top:12px}
+.dock i{width:34px;height:34px;border-radius:9px;display:block;background:rgba(255,255,255,.14)}
+.dock i:nth-child(1){background:#e95420}.dock i:nth-child(2){background:#3a3a3a}
+
+/* bar menu (DBusMenu look) */
+.menu{position:absolute;top:36px;right:118px;width:300px;background:#2e2e2e;border-radius:12px;padding:6px 0;box-shadow:0 10px 30px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);font-size:13px;z-index:31}
+.menu .mi{display:flex;justify-content:space-between;gap:14px;padding:6px 16px;white-space:nowrap;width:100%;color:#fff}
+.menu .mi>span:first-child{overflow:hidden;text-overflow:ellipsis}
+.menu button.mi:hover{background:#454545}
+.menu .mi .v{font-family:var(--mono);color:#ddd}
+.menu .msec{display:flex;justify-content:space-between;color:#999;font-size:11px;letter-spacing:.07em;text-transform:uppercase;padding:9px 16px 3px}
+.menu .mhr{height:1px;background:#444;margin:5px 0}
+.menu kbd{font:500 11px var(--mono);color:#aaa}
+
+/* notifications (GNOME banner) */
+.notifs{position:absolute;top:40px;left:50%;transform:translateX(-50%);width:400px;display:grid;gap:8px;z-index:40}
+.notif{background:#363636;border-radius:14px;padding:11px 12px;display:grid;grid-template-columns:30px 1fr 22px;gap:10px;align-items:start;box-shadow:0 8px 24px rgba(0,0,0,.5);animation:drop .25s ease-out}
+@keyframes drop{from{transform:translateY(-10px);opacity:0}}
+.notif .nic{width:30px;height:30px;border-radius:8px;background:#e95420;display:grid;place-items:center}
+.notif.crit .nic{background:#c01c28}.notif.warn .nic{background:#b46c00}.notif.ok .nic{background:#26a269}
+.notif b{display:block;font-size:13px}
+.notif p{margin:1px 0 0;color:#ccc;font-size:12.5px}
+.notif small{color:#999;font-size:11px}
+.notif button{color:#aaa!important;font-size:12px}
+
+/* HUD (B6) */
+.hud{position:absolute;right:30px;top:58px;width:240px;text-align:right;text-shadow:0 1px 8px rgba(0,0,0,.55)}
+.hud .hl{font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:#f0c9dc}
+.hud .hbig{font-size:60px;font-weight:300;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.hud .hrows{display:grid;gap:3px;margin-top:16px;font-size:12.5px}
+.hud .hrows div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:3px}
+.hud .hrows span:first-child{color:#ecd3df;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+.hud .h-waiting{color:#ffc65c}.hud .h-running{color:#a9cdfa}.hud .h-idle{opacity:.6}.hud .h-journaling{color:#e3a5ea}
+.hud .hcrit{color:#ff8f8f}.hud .hwarn{color:#ffc65c}
+.hud .halert{margin-top:12px;font-size:12.5px;color:#ff8f8f}
+
+/* ───────── window (B1 Adwaita shell) ───────── */
+.win{--w-bg:#242424;--w-side:#2e2e2e;--w-hb:#303030;--w-card:#363636;--w-card2:#3e3e3e;--w-fg:#fff;--w-muted:#a6a6a6;--w-line:rgba(255,255,255,.09);--w-wait:#f6b73c;--w-run:#78aeed;--w-idle:#8a8a8a;--w-jour:#dc8add;--w-crit:#ff7b7b;--w-ok:#57e389;--w-waitbg:rgba(245,166,35,.13);--w-btn:#454545;--w-sel:rgba(255,255,255,.1);--sp-fill:rgba(233,84,32,.22);--sp-line:#e95420;--w-paper:#1c1c1c;
+  position:absolute;left:66px;top:44px;width:850px;height:656px;background:var(--w-bg);color:var(--w-fg);border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.08);display:grid;grid-template-columns:186px 1fr;overflow:hidden;z-index:10}
+.win.light{--w-bg:#fafafa;--w-side:#ebebeb;--w-hb:#ebebeb;--w-card:#ffffff;--w-card2:#f1f1f1;--w-fg:#1e1e1e;--w-muted:#66656b;--w-line:rgba(0,0,0,.1);--w-wait:#9c6500;--w-run:#1c71d8;--w-idle:#77767b;--w-jour:#9141ac;--w-crit:#c01c28;--w-ok:#1b8553;--w-waitbg:#fdf0d5;--w-btn:#dedede;--w-sel:rgba(0,0,0,.07);--w-paper:#e4e4e4}
+.win button{color:var(--w-fg)!important}
+.side{background:var(--w-side);padding:10px 8px;display:flex;flex-direction:column;gap:2px;border-right:1px solid var(--w-line)}
+.side .stt{font-weight:700;padding:8px 10px 12px;font-size:13.5px;display:flex;align-items:center;gap:8px}
+.side .stt i{width:18px;height:18px;border-radius:5px;background:#e95420;display:block}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;width:100%;font-size:13px}
+.nav:hover{background:var(--w-sel)}
+.nav.sel{background:var(--w-sel);font-weight:600}
+.nav em{margin-left:auto;font-style:normal;font-size:10.5px;font-weight:700;border-radius:99px;padding:1px 7px;background:#f5a623;color:#1a1000}
+.nav em.crit{background:#e01b24;color:#fff}
+.side .sfoot{margin-top:auto;padding:8px 10px;font-size:11.5px;color:var(--w-muted);line-height:1.5}
+.main{display:flex;flex-direction:column;min-width:0;position:relative}
+.hb{height:46px;flex:none;background:var(--w-hb);display:flex;align-items:center;justify-content:center;position:relative;font-weight:700;font-size:13.5px;border-bottom:1px solid var(--w-line)}
+.hb .hbl{position:absolute;left:10px;display:flex;gap:6px}
+.hb .hbr{position:absolute;right:8px;display:flex;gap:6px;align-items:center}
+.ib{width:30px;height:30px;border-radius:8px;display:grid;place-items:center}
+.ib:hover{background:var(--w-sel)}
+.ib.x{width:22px;height:22px;border-radius:50%;background:var(--w-btn)!important;font-size:10px}
+.ib.sm{width:24px;height:24px;font-size:12px;color:var(--w-muted)!important}
+.banner{display:flex;align-items:center;gap:12px;padding:9px 14px;font-size:12.5px;flex:none}
+.banner.warn{background:#7a4f00;color:#fff}.banner.crit{background:#a51d2d;color:#fff}
+.win.light .banner.warn{background:#f6d32d;color:#3d2c00}
+.banner span{flex:1}
+.banner button{background:rgba(255,255,255,.2)!important;border-radius:7px!important;padding:4px 10px!important;font-weight:600;color:inherit!important}
+.content{flex:1;overflow:auto;padding:16px 18px 70px;display:flex;flex-direction:column;gap:14px;min-height:0}
+.cap{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--w-muted);font-weight:600}
+.card{background:var(--w-card);border-radius:12px;border:1px solid var(--w-line)}
+.btn{background:var(--w-btn)!important;border-radius:8px!important;padding:6px 12px!important;font-weight:600;font-size:12.5px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.btn.p{background:#e95420!important;color:#fff!important}
+.btn.d{background:#c01c28!important;color:#fff!important}
+.btn.ghost{background:transparent!important;border:1px solid var(--w-line)!important}
+.btn:hover{filter:brightness(1.1)}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.toolbar .sp{flex:1}
+.seg{display:flex;background:var(--w-card2);border-radius:9px;padding:2px}
+.seg button{padding:4px 12px!important;border-radius:7px!important;font-size:12.5px;color:var(--w-muted)!important}
+.seg button.on{background:var(--w-btn)!important;color:var(--w-fg)!important;font-weight:600}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.mcard{padding:11px 12px;display:grid;gap:2px}
+.mcard b{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2}
+.mcard small{color:var(--w-muted);font-size:11.5px}
+.mcard.lvl-warn{border-color:#c7870b;box-shadow:inset 0 0 0 1px #c7870b}
+.mcard.lvl-crit{border-color:#e01b24;box-shadow:inset 0 0 0 1px #e01b24}
+.sp-area{fill:var(--sp-fill)}.sp-line{fill:none;stroke:var(--sp-line);stroke-width:1.6}.sp-dot{fill:var(--w-fg)}.sp-bar{fill:#e95420}.sp-bar.now{fill:#ffb36b}
+.sp-th{stroke-width:1;stroke-dasharray:3 3}.sp-th.w{stroke:#c7870b}.sp-th.c{stroke:#e01b24}
+.sk{background:linear-gradient(90deg,var(--w-card2),var(--w-sel),var(--w-card2));background-size:200% 100%;animation:sh 1.4s linear infinite;border-radius:6px;display:block}
+@keyframes sh{to{background-position:-200% 0}}
+.cols2{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;align-items:start}
+.needs{background:var(--w-waitbg);border:1px solid #c7870b;border-radius:12px;padding:11px 13px;display:grid;gap:8px}
+.needs .nrow{display:flex;align-items:center;gap:10px}
+.needs .nrow div{flex:1;min-width:0}
+.needs .nrow b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.needs .nrow small{color:var(--w-muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.boxlist{overflow:hidden}
+.srow{display:flex;align-items:center;gap:9px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--w-line);min-height:46px}
+.srow:last-child{border-bottom:0}
+.glyph{width:16px;text-align:center;font-weight:700;flex:none}
+.g-waiting{color:var(--w-wait)}.g-running{color:var(--w-run)}.g-idle{color:var(--w-idle)}.g-launching{color:var(--w-idle)}.g-journaling{color:var(--w-jour)}
+.stitle{flex:1;min-width:0;display:grid!important;border-radius:6px;padding:2px 4px!important}
+.stitle:hover{background:var(--w-sel)}
+.stitle b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stitle small{color:var(--w-muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.age{color:var(--w-muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.srow .jt{font-size:11.5px;color:var(--w-jour)}
+.projbars{padding:12px;display:grid;gap:8px;font-size:12.5px}
+.pb{display:grid;grid-template-columns:86px 1fr 52px;gap:8px;align-items:center}
+.pb i{height:7px;border-radius:4px;display:block}
+.pb span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.budget{padding:12px;display:grid;gap:6px;font-size:12.5px}
+.trk{height:7px;border-radius:9px;background:var(--w-card2);overflow:hidden}
+.trk i{display:block;height:100%;background:#e95420;border-radius:9px}
+.trk.over i{background:#e01b24}
+/* cockpit */
+.cockpit{display:grid;gap:9px}
+.ccard{padding:11px 13px;display:grid;gap:7px}
+.ccard.st-waiting{background:var(--w-waitbg);border-color:#c7870b}
+.ccard .top{display:flex;align-items:center;gap:10px}
+.ccard .top b{flex:1;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ccard .meta{display:flex;gap:12px;color:var(--w-muted);font-size:12px;flex-wrap:wrap}
+.pill{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:99px;white-space:nowrap}
+.p-waiting{background:#c7870b;color:#1a1000}.p-running{background:#1c4f80;color:#d3e8ff}.p-idle{background:var(--w-btn);color:var(--w-muted)}.p-launching{background:var(--w-btn);color:var(--w-muted)}.p-journaling{background:#613583;color:#f1dcf6}
+.q{font-family:var(--mono);font-size:12px;background:var(--w-bg);border:1px solid var(--w-line);border-radius:8px;padding:9px 11px;line-height:1.55}
+.q ol{margin:6px 0 0;padding:0;list-style:none}
+.q li::before{content:"  "}.q li:first-child::before{content:"❯ ";color:#e95420}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.tool{font-family:var(--mono);font-size:12px;color:var(--w-run)}
+.blink{animation:bl 1.2s steps(2) infinite}@keyframes bl{50%{opacity:.25}}
+.steps{display:grid;gap:4px;font-size:12.5px;margin:0;padding:0;list-style:none}
+.steps li{display:flex;gap:8px;align-items:center;color:var(--w-muted)}
+.steps li.done{color:var(--w-fg)}.steps li.done::before{content:"✓";color:var(--w-ok);width:12px}
+.steps li.now{color:var(--w-fg);font-weight:600}.steps li.now .spin{width:11px;height:11px;border-color:var(--w-line);border-top-color:var(--w-jour)}
+.steps li.todo::before{content:"○";width:12px}
+.steps li.fail{color:var(--w-crit);font-weight:600}.steps li.fail::before{content:"✕";width:12px}
+/* board */
+.board{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;align-items:start}
+.col{background:var(--w-card2);border-radius:12px;padding:9px;display:grid;gap:8px;align-content:start;min-height:200px}
+.col h4{margin:0;display:flex;justify-content:space-between;font-size:12px;font-weight:600;padding:2px 3px}
+.bcard{padding:9px 10px;display:grid;gap:4px;border-left:3px solid transparent!important;cursor:grab;font-size:12.5px}
+.bcard.st-waiting{border-left-color:#f5a623!important}.bcard.st-running{border-left-color:#62a0ea!important}.bcard.st-idle{border-left-color:#77767b!important}.bcard.st-launching{border-left-color:transparent!important;opacity:.7}
+.bcard b{font-weight:600;line-height:1.3}
+.bcard small{color:var(--w-muted);display:flex;justify-content:space-between;gap:8px}
+.bcard.dragging{opacity:.4}
+.colempty{color:var(--w-muted);font-size:12px;text-align:center;padding:16px 4px}
+.dropzone{border:2px dashed var(--w-line);border-radius:12px;padding:14px;text-align:center;color:var(--w-muted);font-size:12.5px;display:grid;gap:8px;transition:background .15s,border-color .15s}
+.dropzone.over{border-color:#e95420;background:rgba(233,84,32,.1);color:var(--w-fg)}
+.dropzone .card{text-align:left;padding:10px 12px}
+/* empty / error */
+.empty{display:grid;place-items:center;text-align:center;padding:40px 20px;gap:10px;color:var(--w-muted)}
+.empty .eic{width:64px;height:64px;border-radius:18px;background:var(--w-card2);display:grid;place-items:center;font-size:28px}
+.empty h3{margin:0;color:var(--w-fg);font-size:17px}
+.empty p{margin:0;max-width:44ch;font-size:13px}
+.code{font-family:var(--mono);font-size:12.5px;background:var(--w-card2);border-radius:8px;padding:7px 10px;display:inline-flex;gap:10px;align-items:center;color:var(--w-fg)}
+/* spend / receipts */
+.recv{display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start}
+.days{padding:6px;display:grid;gap:1px}
+.day{display:grid!important;grid-template-columns:1fr auto;grid-template-rows:auto auto;gap:3px 8px;padding:6px 9px!important;border-radius:8px!important;font-size:12.5px}
+.day:hover{background:var(--w-sel)}.day.sel{background:var(--w-sel);font-weight:600}
+.day span:nth-child(2){font-variant-numeric:tabular-nums}
+.day i{grid-column:1/-1;height:3px;border-radius:2px;background:#e95420;display:block;opacity:.75}
+.paperwrap{background:var(--w-paper);border-radius:12px;padding:16px;display:grid;justify-items:center}
+.paper{width:290px;background:#f7f8f6;color:#1d1d1d;font-family:var(--mono);font-size:12px;padding:16px 18px 24px;box-shadow:0 6px 16px rgba(0,0,0,.25);
+  -webkit-mask:radial-gradient(circle 5px at 50% 100%,#0000 98%,#000) 0 0/12px 100%;mask:radial-gradient(circle 5px at 50% 100%,#0000 98%,#000) 0 0/12px 100% repeat-x}
+.paper .c{text-align:center}.paper .l{display:flex;justify-content:space-between;gap:8px}
+.paper .dash{border-top:1px dashed #888;margin:7px 0}.paper .m{color:#666}.paper .tip{color:#b03a14}
+.paper .tot{font-weight:700;font-size:14.5px}
+.spendhead{display:flex;gap:14px;align-items:stretch;flex-wrap:wrap}
+.spendhead .card{padding:10px 13px;flex:1;min-width:140px}
+.spendhead b{font-size:19px;font-variant-numeric:tabular-nums;display:block}
+/* system */
+.sysgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.scard{padding:12px 13px;display:grid;gap:6px}
+.scard .sh{display:flex;justify-content:space-between;align-items:baseline}
+.scard .sh b{font-size:20px;font-variant-numeric:tabular-nums}
+.scard small{color:var(--w-muted);font-size:12px}
+.lvlchip{font-size:10.5px;font-weight:700;border-radius:99px;padding:2px 8px}
+.lvlchip.ok{background:rgba(87,227,137,.18);color:var(--w-ok)}.lvlchip.warn{background:#c7870b;color:#1a1000}.lvlchip.crit{background:#e01b24;color:#fff}.lvlchip.na{background:var(--w-btn);color:var(--w-muted)}
+.scard.na{opacity:.75}
+/* journal */
+.jl{display:grid;grid-template-columns:250px 1fr;gap:12px;align-items:start}
+.jlist{overflow:hidden}
+.jrow{display:grid!important;grid-template-columns:1fr auto;gap:2px 8px;padding:9px 12px!important;border-bottom:1px solid var(--w-line)!important;width:100%;font-size:12.5px}
+.jrow:hover{background:var(--w-sel)}.jrow.sel{background:var(--w-sel)}
+.jrow b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jrow small{color:var(--w-muted);grid-column:1/-1}
+.jok{color:var(--w-ok);font-size:11px;font-weight:700}.jfail{color:var(--w-crit);font-size:11px;font-weight:700}
+.jdet{padding:14px 16px;display:grid;gap:10px;font-size:12.5px}
+.jdet h3{margin:0;font-size:16px}
+.jdet blockquote{margin:0;padding:9px 12px;border-left:3px solid #e95420;background:var(--w-card2);border-radius:0 8px 8px 0}
+.jdet blockquote.f{border-left-color:#e01b24}
+.jdet dl{display:grid;grid-template-columns:110px 1fr;gap:5px 10px;margin:0}
+.jdet dt{color:var(--w-muted)}.jdet dd{margin:0;font-family:var(--mono);font-size:12px}
+.path{font-family:var(--mono);font-size:11.5px;color:var(--w-muted)}
+/* settings */
+.pgroup{display:grid;gap:6px}
+.pgroup .card{overflow:hidden}
+.prow{display:flex;align-items:center;gap:12px;padding:10px 13px;border-bottom:1px solid var(--w-line);min-height:50px}
+.prow:last-child{border-bottom:0}
+.prow .pl{flex:1;min-width:0}
+.prow .pl b{display:block;font-weight:500;font-size:13px}
+.prow .pl small{color:var(--w-muted);font-size:11.5px}
+.prow code{font-family:var(--mono);font-size:11px;color:var(--w-muted)}
+.sw{width:40px;height:22px;border-radius:99px;background:var(--w-btn)!important;position:relative;flex:none}
+.sw::after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.sw.on{background:#e95420!important}.sw.on::after{left:21px}
+.prow input[type=range]{width:160px;accent-color:#e95420}
+.prow input[type=number],.prow input[type=text]{width:90px;font:inherit;font-size:12.5px;background:var(--w-card2);color:var(--w-fg);border:1px solid var(--w-line);border-radius:7px;padding:4px 7px}
+.prow output{font-family:var(--mono);font-size:12px;width:38px;text-align:right}
+.preview{background:#000;border-radius:10px;height:40px;display:flex;align-items:center;justify-content:flex-end;padding:0 10px;margin:4px 13px 12px}
+.preview .ind{pointer-events:none}
+/* dialogs */
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:20}
+.dialog{width:400px;background:var(--w-card);border-radius:16px;padding:20px;display:grid;gap:12px;box-shadow:0 16px 40px rgba(0,0,0,.5);color:var(--w-fg)}
+.dialog h3{margin:0;font-size:17px;text-align:center;text-wrap:balance}
+.dialog p{margin:0;font-size:13px;color:var(--w-muted);text-align:center}
+.dialog code{font-family:var(--mono);font-size:12px;color:var(--w-fg)}
+.dbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+.dbtns .btn{justify-content:center;padding:9px!important}
+.dialog.new{width:460px}
+.crumbs{font-family:var(--mono);font-size:12px;color:var(--w-muted);background:var(--w-card2);border-radius:8px;padding:6px 10px}
+.dirs{display:grid;grid-template-columns:1fr 1fr;gap:3px;max-height:230px;overflow:auto}
+.dir{display:flex!important;align-items:center;gap:8px;padding:6px 9px!important;border-radius:8px!important;font-size:12.5px}
+.dir:hover{background:var(--w-sel)}.dir.sel{background:#e95420!important;color:#fff!important}
+.dir svg{width:15px;height:15px;flex:none}
+.launch{display:grid;place-items:center;gap:12px;padding:12px 0}
+.launch .spin{width:26px;height:26px;border-width:3px;border-color:var(--w-line);border-top-color:#e95420}
+/* toast */
+.toast{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:#1e1e1e;color:#fff;border-radius:99px;padding:9px 10px 9px 18px;font-size:12.5px;display:flex;gap:12px;align-items:center;box-shadow:0 6px 18px rgba(0,0,0,.4);z-index:25;white-space:nowrap;animation:up .2s ease-out}
+.win.light .toast{background:#303030}
+.toast.err{background:#a51d2d}
+@keyframes up{from{transform:translate(-50%,8px);opacity:0}}
+.toast button{color:#fff!important;font-weight:600;padding:3px 9px!important;border-radius:99px!important;background:rgba(255,255,255,.12)!important}
+/* palette (B5) */
+.palscrim{position:absolute;inset:0;background:rgba(0,0,0,.4);z-index:50}
+.pal{position:absolute;left:50%;top:110px;transform:translateX(-50%);width:560px;background:#262626;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.08);overflow:hidden;color:#fff}
+.pal .pin{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #3a3a3a}
+.pal input{flex:1;background:none;border:0;color:#fff;font:400 18px var(--sans);outline:none}
+.pal .plist{padding:6px;display:grid;gap:1px;max-height:330px;overflow:auto}
+.pal .pi{display:flex!important;align-items:center;gap:10px;padding:8px 10px!important;border-radius:9px!important;width:100%;font-size:13.5px;color:#fff!important}
+.pal .pi.sel{background:#3d3d3d}
+.pal .pi .pg{width:18px;text-align:center}
+.pal .pi span:nth-child(2){flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pal .pi small{color:#999;font-size:11.5px}
+.pal kbd{font:500 10.5px var(--mono);background:#3f3f3f;border-radius:5px;padding:2px 6px;color:#ccc}
+.pal .pstat{display:flex;gap:16px;padding:9px 16px;border-top:1px solid #3a3a3a;font-size:12px;color:#aaa;background:#1e1e1e;flex-wrap:wrap}
+.pal .pnone{padding:22px;text-align:center;color:#999}
+.pal mark{background:none;color:#ff9b6b;font-weight:600}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-net" viewBox="0 0 16 16"><path fill="#fff" d="M8 3C5 3 2.4 4.2.5 6.1L8 14l7.5-7.9C13.6 4.2 11 3 8 3z"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 16 16"><path fill="#fff" d="M2 6h3l4-3v10L5 10H2z"/></symbol>
+  <symbol id="i-pow" viewBox="0 0 16 16"><rect x="1" y="4" width="12" height="8" rx="2" fill="none" stroke="#fff" stroke-width="1.4"/><rect x="3" y="6" width="7" height="4" fill="#fff"/><rect x="13.5" y="6.5" width="1.5" height="3" fill="#fff"/></symbol>
+  <symbol id="i-term" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.5 6.5l2 1.5-2 1.5M8.5 10h3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></symbol>
+  <symbol id="i-home" viewBox="0 0 16 16"><path d="M2.5 7.5L8 3l5.5 4.5V13a.5.5 0 01-.5.5H3a.5.5 0 01-.5-.5z"/></symbol>
+  <symbol id="i-sess" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6h13"/></symbol>
+  <symbol id="i-coin" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M10 6c-.4-.7-1.1-1-2-1-1.1 0-2 .6-2 1.5S7 8 8 8s2 .5 2 1.5S9.1 11 8 11c-.9 0-1.6-.3-2-1M8 4v1M8 11v1"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2"/></symbol>
+  <symbol id="i-book" viewBox="0 0 16 16"><path d="M2.5 3h4a1.5 1.5 0 011.5 1.5V13a1 1 0 00-1-1h-4.5zM13.5 3h-4A1.5 1.5 0 008 4.5V13a1 1 0 011-1h4.5z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.5 4a1 1 0 011-1h3.5l1.5 1.5h6a1 1 0 011 1V12a1 1 0 01-1 1h-11a1 1 0 01-1-1z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 16 16"><path d="M4 11V7a4 4 0 018 0v4l1 1.5H3zM6.5 14h3"/></symbol>
+</svg>
+
+<div class="page">
+  <div class="phead">
+    <div>
+      <div class="eyebrow">smartPanel · interactive prototype · Ubuntu 24.04</div>
+      <h1>smartPanel, the mix</h1>
+      <p>Your ten picks in one working prototype. Click anything on the desktop, or drive it from the panel on the right: scenarios, live values, every flow step by step, and a jump list of every screen and state. Example data, not your real usage.</p>
+    </div>
+    <div class="picks" aria-label="Styles in this mix"><span><em>A1</em>Clean Text</span><span><em>A4</em>Live Graphs</span><span><em>A5</em>Ticker</span><span><em>A6</em>Session Strip</span><span><em>B1</em>Adwaita App</span><span><em>B2</em>Cockpit</span><span><em>B3</em>Board</span><span><em>B5</em>Palette</span><span><em>B6</em>HUD</span><span><em>B7</em>Receipts</span></div>
+  </div>
+  <div class="app">
+    <div>
+      <div id="stage"><div id="desk"></div></div>
+      <div class="hint"><span>Click the panel indicator for its menu · middle-click opens the dashboard</span><span><kbd>Ctrl</kbd>+<kbd>K</kbd> command palette</span><span><kbd>Esc</kbd> closes overlays</span><span>Drag a board card onto the drop zone to journal &amp; close</span></div>
+    </div>
+    <aside id="ctl" aria-label="Prototype controls"></aside>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var desk=document.getElementById('desk'), ctl=document.getElementById('ctl'), stage=document.getElementById('stage');
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function money(n){return '$'+n.toFixed(2)}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function fmtAge(m){m=Math.round(m);if(m<1)return 'now';if(m<60)return m+'m';var h=Math.floor(m/60),r=m%60;return h+'h'+(r<10?'0':'')+r}
+var PROJECTS=['PromptKit','JobScout','tacomap','wishlist','LeadPilot','noteKeeper','ledgerly','giftswap','smartPanel','netConfigs'];
+var META={waiting:{g:'❓',label:'Needs you'},running:{g:'▶',label:'Running'},idle:{g:'·',label:'Idle'},launching:{g:'◌',label:'Starting'},journaling:{g:'⏳',label:'Journaling'}};
+var PROMPT_EDIT={q:'Do you want to make this edit to alerts.py?',opts:['Yes','Yes, allow all edits this session','No, tell Claude what to do differently']};
+var PROMPT_ASK={q:'Which migration strategy should I use for 0023?',opts:['Down-migrate 0022 first','Apply on top of the current schema','Skip 0023 for now']};
+var JSTEPS=['Wait for the session to go idle','Type /journal {p} into the session','Skill appends to JOURNAL/2026-11.md','Close the tmux session','Write the receipt'];
+var PAGES=[['overview','Overview','i-home'],['sessions','Sessions','i-sess'],['spend','Spend','i-coin'],['system','System','i-cpu'],['journal','Journal','i-book'],['settings','Settings','i-gear']];
+var uid=1;
+function mkS(title,project,state,age,cost,extra){var s={id:'s'+(uid++),title:title,project:project,state:state,age:age,cost:cost,attached:false,tool:null,prompt:null,jstep:0,jfail:false};for(var k in (extra||{}))s[k]=extra[k];return s}
+function busySessions(){return [
+  mkS('Fix swap alert hysteresis','smartPanel','waiting',62,2.90,{attached:true,prompt:PROMPT_EDIT}),
+  mkS('Truck search filters','tacomap','running',38,1.85,{tool:'Bash · npm test -- filters'}),
+  mkS('Stripe webhook retries','JobScout','running',12,1.88,{tool:'Waiting for 2 background agents'}),
+  mkS('Migrate goose 0023','ledgerly','idle',190,2.09)]}
+function hist(base,spread,n){var a=[],v=base;for(var i=0;i<n;i++){v=clamp(v+(Math.random()-.5)*spread,0,100);a.push(i>n-4?base+(Math.random()-.5)*spread*.3:v)}return a}
+function seedJournal(){return [
+  {id:'j3',time:'12:02',title:'Map clustering',project:'tacomap',ok:true,dur:'2h30m',line:'Journaled tacomap to JOURNAL/2026-11.md. Map clustering moved to supercluster on the web map; server-side tiles rejected for now.',files:['web/src/components/Map.tsx','web/src/lib/cluster.ts','web/package.json'],cmds:['npm test -- map','npm run build'],tools:'Read 14 · Edit 9 · Bash 6 · Grep 4'},
+  {id:'j2',time:'11:24',title:'Résumé parser',project:'JobScout',ok:false,dur:'1h24m',line:'The /journal skill timed out after 300 s. The session was still closed; this receipt holds the Activity section only.',files:['src/lib/resume/parse.ts','src/lib/resume/parse.test.ts'],cmds:['npm test -- resume'],tools:'Read 11 · Edit 6 · Bash 4'},
+  {id:'j1',time:'10:36',title:'Pricing table refresh',project:'smartPanel',ok:true,dur:'2h06m',line:'Journaled smartPanel to JOURNAL/2026-11.md. pricing.py carries the 5.5 family; unknown models still fall back to Opus rates.',files:['smartpanel/claude_stats/pricing.py','tests/test_pricing.py'],cmds:['pytest tests/test_pricing.py'],tools:'Read 8 · Edit 5 · Bash 3'}]}
+function DEFAULTS(){return {
+  scenario:'busy', page:'overview', sview:'cockpit', wtheme:'dark', menu:false, win:true, hud:true,
+  palette:false, pq:'', psel:0, bar:{strip:true,graphs:true,text:true,ticker:false}, tick:0, pinned:false,
+  cpu:23, mem:68, temp:61, down:2.4, up:0.18, swap:12, swapTotal:8, noSwap:false,
+  alert:{level:0,alerted:false}, th:{warn:60,crit:85,hyst:5},
+  spend:23.84, week:142.10, life:2318.55, tokens:41.2, burn:3.10, cache:94, budget:40,
+  sessions:busySessions(), tmuxOk:true, loading:null, firstRun:false,
+  dialog:null, toast:null, notifs:[], day:0, jsel:0,
+  settings:{journal:true,minAge:2,confirmS:5,reattach:true,dir:'~/dev/omdev',shortcut:'Ctrl+Alt+Space'},
+  ctl:{live:true,journalFails:false,focusRoute:'reattach',terminalMissing:false},
+  hist:{cpu:hist(23,14,30),mem:hist(68,3,30),swap:hist(12,1,30)},
+  journal:seedJournal()
+}}
+var S=DEFAULTS();
+function find(id){for(var i=0;i<S.sessions.length;i++)if(S.sessions[i].id===id)return S.sessions[i];return null}
+function counts(){var c={waiting:0,running:0,idle:0,launching:0,journaling:0};S.sessions.forEach(function(s){c[s.state]++});return c}
+var ORDER={waiting:0,running:1,journaling:2,launching:3,idle:4};
+function sorted(){return S.sessions.slice().sort(function(a,b){return ORDER[a.state]-ORDER[b.state]})}
+function lvlName(){return ['ok','warn','crit'][S.alert.level]}
+function tname(s){return s.title||s.project}
+function scaleCost(){return S.spend/23.84}
+
+/* ───── swap alert policy (mirrors alerts.py: hysteresis, notify up, quiet down, notify on recovery) ───── */
+function evalSwap(){
+  var p=S.noSwap?null:S.swap, th=S.th, cur=S.alert.level, target=p==null?0:(p>=th.crit?2:(p>=th.warn?1:0)), next=cur;
+  if(target>cur) next=target;
+  else { while(next>0){ var b=next===2?th.crit:th.warn; if(p==null||p<b-th.hyst) next--; else break; } }
+  if(next>cur){ S.alert.alerted=true; notify(next===2?'Swap critically full':'Swap is filling up', Math.round(p)+'% used ('+(p/100*S.swapTotal).toFixed(1)+' of '+S.swapTotal+' GB). Close something heavy before the system stalls.', next===2?'crit':'warn'); }
+  else if(next===0&&cur>0&&S.alert.alerted){ S.alert.alerted=false; notify('Swap back to normal', (p==null?'No swap configured':Math.round(p)+'% used')+'. The alert is cleared.','ok'); }
+  S.alert.level=next;
+}
+
+/* ───── tiny charts ───── */
+function spark(a,w,h,opt){opt=opt||{};var max=opt.max||Math.max.apply(null,a.concat([1]))*1.15,n=a.length,pts=a.map(function(v,i){return [(i*(w-4)/(n-1)+2).toFixed(1),(h-2-v/max*(h-6)).toFixed(1)]});
+  var s='<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" aria-hidden="true">';
+  (opt.th||[]).forEach(function(t){var y=(h-2-t[0]/max*(h-6)).toFixed(1);s+='<line class="sp-th '+t[1]+'" x1="0" x2="'+w+'" y1="'+y+'" y2="'+y+'"/>'});
+  s+='<path class="sp-area" d="M'+pts.map(function(p){return p.join(',')}).join('L')+'L'+pts[n-1][0]+','+h+'L2,'+h+'Z"/>';
+  s+='<polyline class="sp-line" points="'+pts.map(function(p){return p.join(',')}).join(' ')+'"/>';
+  s+='<circle class="sp-dot" cx="'+pts[n-1][0]+'" cy="'+pts[n-1][1]+'" r="2.4"/></svg>';return s}
+var COST_H=[0,0,0,0,0,0,0,0,.4,1.9,3.4,2.8,3.1,4.2,3.3,2.6,1.4,.74];
+function bars(a,w,h){var max=Math.max.apply(null,a.concat([.01]))*1.1,bw=w/a.length,s='<svg width="'+w+'" height="'+h+'" aria-hidden="true">';
+  a.forEach(function(v,i){var bh=v/max*(h-2);if(bh>0)s+='<rect class="sp-bar'+(i===a.length-1?' now':'')+'" x="'+(i*bw+.5).toFixed(1)+'" y="'+(h-bh).toFixed(1)+'" width="'+Math.max(1,bw-1.5).toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="1"/>'});return s+'</svg>'}
+
+/* ───── top bar (A6 strip + A4 graphs + A1 text | A5 ticker) ───── */
+function textHTML(){var c=counts(),l=S.alert.level;
+  var sw=S.noSwap?'—':Math.round(S.swap); if(l) sw='<span class="'+(l===2?'rd':'am')+'">⚠'+sw+'</span>';
+  var ss=S.tmuxOk?(S.sessions.length+(c.waiting?'/<span class="am">'+c.waiting+'</span>':'')):'<span class="rd">!</span>';
+  var cost=S.firstRun?'—':S.spend.toFixed(2);
+  var icon=(S.bar.strip||S.bar.graphs)?'':'<svg class="ico"><use href="#i-term"/></svg> ';
+  return '<span class="mono">'+icon+sw+' · '+ss+' · '+cost+'</span>'}
+function tickerItems(){var c=counts();return [
+  {k:'cost',t:(S.firstRun?'No spend yet':money(S.spend)+' <small>today</small>')},
+  {k:'sess',t:(S.tmuxOk?S.sessions.length+' sessions'+(c.waiting?' · <span class="am">'+c.waiting+' waiting</span>':''):'<span class="rd">tmux missing</span>')},
+  {k:'swap',t:'Swap '+(S.noSwap?'—':Math.round(S.swap)+'%')},
+  {k:'cpu',t:'CPU '+Math.round(S.cpu)+'% · '+S.temp+' °C'}]}
+function tickerHTML(){var l=S.alert.level;if(l)return '<span class="'+(l===2?'rd':'am')+'">⚠ Swap '+Math.round(S.swap)+'%</span><small>pinned by alert</small>';
+  var it=tickerItems(),i=S.tick%it.length;return '<span>'+it[i].t+'</span><span class="dots">'+it.map(function(_,j){return j===i?'●':'○'}).join('')+'</span>'+(S.pinned?'<small>pinned</small>':'')}
+function barInner(cfg){
+  if(S.loading) return '<span class="spin"></span><span class="mono">reading '+S.loading.done+'/'+S.loading.total+'</span>';
+  var p=[],l=S.alert.level;
+  if(cfg.strip&&S.tmuxOk&&S.sessions.length){var max=6,ss=sorted();p.push('<span class="strip" aria-label="'+S.sessions.length+' sessions">'+ss.slice(0,max).map(function(s){return '<i class="t-'+s.state+'" title="'+esc(tname(s))+' · '+META[s.state].label+'"></i>'}).join('')+(ss.length>max?'<b>+'+(ss.length-max)+'</b>':'')+'</span>')}
+  if(cfg.graphs){p.push('<span class="vb">'+S.hist.cpu.slice(-10).map(function(v){return '<i style="height:'+clamp(Math.round(v/100*16),2,16)+'px"></i>'}).join('')+'</span><span class="meters" title="memory, swap"><span class="meter"><i style="height:'+S.mem+'%"></i></span><span class="meter swp '+(l?'m-'+lvlName():'')+'"><i style="height:'+(S.noSwap?0:S.swap)+'%"></i></span></span>')}
+  if(cfg.ticker)p.push(tickerHTML());else if(cfg.text)p.push(textHTML());
+  if(!p.length)p.push('<svg class="ico"><use href="#i-term"/></svg>');
+  return p.join('')}
+function topbarHTML(){return '<div class="topbar"><div class="ws"><b></b><s></s><s></s></div><div class="clock">Tue 17 Nov 14:32</div><div class="tray">'+
+  '<button class="ind'+(S.menu?' on':'')+'" id="ind" data-act="menu" aria-haspopup="menu" aria-expanded="'+S.menu+'" title="smartPanel · click for menu, middle-click for dashboard">'+barInner(S.bar)+'</button>'+
+  '<div class="sys"><svg><use href="#i-net"/></svg><svg><use href="#i-vol"/></svg><svg><use href="#i-pow"/></svg></div></div></div>'}
+function menuHTML(){if(!S.menu)return '';var c=counts(),l=S.alert.level,h='';
+  function sec(a,b){return '<div class="msec"><span>'+a+'</span><span>'+(b||'')+'</span></div>'}
+  function row(a,b,cls){return '<div class="mi"><span>'+a+'</span><span class="v '+(cls||'')+'">'+b+'</span></div>'}
+  function act(a,b,act,arg,dis){return '<button class="mi" role="menuitem" data-act="'+act+'"'+(arg?' data-arg="'+arg+'"':'')+(dis?' disabled':'')+'><span>'+a+'</span><span class="v">'+(b||'')+'</span></button>'}
+  h+=sec('System')+row('CPU',Math.round(S.cpu)+'%')+row('Memory',Math.round(S.mem)+'%')+row('Swap',S.noSwap?'none':Math.round(S.swap)+'%'+(l?(l===2?' critical':' high'):''),l?(l===2?'rd':'am'):'');
+  h+='<div class="mhr"></div>'+sec('Claude · today');
+  if(S.loading)h+=row('Reading transcripts…',S.loading.done+'/'+S.loading.total);else if(S.firstRun)h+=row('No transcripts yet','—');else h+=row('Spent',money(S.spend))+row('Burn rate','$'+S.burn.toFixed(2)+'/h');
+  h+='<div class="mhr"></div>'+sec('Sessions',S.tmuxOk?S.sessions.length+(c.waiting?' · '+c.waiting+' waiting':''):'tmux missing');
+  if(S.tmuxOk){var ss=sorted();ss.slice(0,4).forEach(function(s){h+=act(META[s.state].g+' '+esc(tname(s)),fmtAge(s.age),'focus',s.id,s.state==='journaling'||s.state==='launching')});if(ss.length>4)h+=act('+'+(ss.length-4)+' more…','','page','sessions');if(!ss.length)h+=row('<span class="gr">No sessions</span>','')}
+  h+='<div class="mhr"></div>'+act('New session…','','new-session')+act('Command palette…','<kbd>Ctrl K</kbd>','palette')+act('Open dashboard','','open-window');
+  if(S.bar.ticker)h+=act(S.pinned?'Resume rotation':'Pin current reading','','pin');
+  h+=act((S.hud?'☑':'☐')+' Desktop HUD','','hud');
+  h+='<div class="mhr"></div>'+act('Quit smartPanel','','noop','',true);
+  return '<div class="menu" role="menu">'+h+'</div>'}
+
+/* ───── window pages ───── */
+function sessionRow(s){var j=s.state==='journaling',ln=s.state==='launching';
+  return '<div class="srow"><span class="glyph g-'+s.state+'" title="'+META[s.state].label+'">'+META[s.state].g+'</span>'+
+  '<button class="stitle" data-act="focus" data-arg="'+s.id+'" title="Bring its terminal forward"'+(j||ln?' disabled':'')+'><b>'+esc(tname(s))+(s.retitling?' <span class="spin" style="width:10px;height:10px"></span>':'')+'</b><small>'+esc(s.project)+(s.attached?' · ● attached':'')+(j?'':' · '+money(s.cost))+'</small></button>'+
+  (j?'<span class="jt">⏳ '+esc(JSTEPS[Math.min(s.jstep,JSTEPS.length-1)].replace('{p}',s.project))+'…</span>':(ln?'<span class="age">starting…</span>':'<span class="age">'+fmtAge(s.age)+'</span>'))+
+  '<button class="ib sm" data-act="retitle" data-arg="'+s.id+'" title="Re-read title from tmux"'+(j||ln?' disabled':'')+'>⟳</button>'+
+  '<button class="ib sm" data-act="close-session" data-arg="'+s.id+'" title="Close session"'+(j||ln?' disabled':'')+'>✕</button></div>'}
+function metricsHTML(){
+  if(S.loading){var sk='<div class="card mcard"><span class="sk" style="width:50%;height:10px"></span><span class="sk" style="width:70%;height:22px;margin-top:6px"></span><span class="sk" style="height:26px;margin-top:6px"></span></div>';return '<div class="grid4" id="live-metrics">'+sk+card('CPU',Math.round(S.cpu)+'%',spark(S.hist.cpu,160,30,{max:100}),S.temp+' °C')+sk.replace('card mcard','card mcard')+card('Swap',S.noSwap?'—':Math.round(S.swap)+'%',spark(S.hist.swap,160,30,{max:100}),'',S.alert.level)+'</div>'}
+  var l=S.alert.level;
+  return '<div class="grid4" id="live-metrics">'+
+    card('Today',S.firstRun?'—':money(S.spend),bars(COST_H.map(function(v){return v*scaleCost()}),160,30),S.firstRun?'No transcripts yet':S.tokens+'M tokens · $'+S.burn.toFixed(2)+'/h')+
+    card('CPU',Math.round(S.cpu)+'%',spark(S.hist.cpu,160,30,{max:100}),S.temp+' °C')+
+    card('Memory',Math.round(S.mem)+'%',spark(S.hist.mem,160,30,{max:100}),(S.mem/100*16).toFixed(1)+' of 16 GB')+
+    card('Swap',S.noSwap?'—':Math.round(S.swap)+'%',S.noSwap?'<svg width="160" height="30"></svg>':spark(S.hist.swap,160,30,{max:100,th:[[S.th.warn,'w'],[S.th.crit,'c']]}),S.noSwap?'No swap configured':(S.swap/100*S.swapTotal).toFixed(1)+' of '+S.swapTotal+' GB',l)+'</div>'}
+function card(t,v,g,sub,l){return '<div class="card mcard'+(l?' lvl-'+['ok','warn','crit'][l]:'')+'"><span class="cap">'+t+'</span><b>'+v+'</b>'+g+'<small>'+sub+'</small></div>'}
+function projSplit(){var k=scaleCost();return [['smartPanel',9.20*k,'#e95420'],['tacomap',7.45*k,'#f6a05c'],['JobScout',5.10*k,'#62a0ea'],['ledgerly',2.09*k,'#9a7fd1']]}
+function overviewHTML(){var c=counts(),h=metricsHTML();
+  if(S.tmuxOk&&c.waiting){h+='<div class="needs"><span class="cap" style="color:var(--w-wait)">Needs you · '+c.waiting+'</span>'+S.sessions.filter(function(s){return s.state==='waiting'}).map(function(s){return '<div class="nrow"><span class="glyph g-waiting">❓</span><div><b>'+esc(tname(s))+'</b><small>“'+esc(s.prompt?s.prompt.q:'Waiting for input')+'”</small></div><button class="btn p" data-act="goto-answer">Answer</button></div>'}).join('')+'</div>'}
+  var list;
+  if(!S.tmuxOk)list='<div class="card empty" style="padding:24px"><h3>tmux isn’t installed</h3><p>Sessions can’t be listed.</p><button class="btn" data-act="page" data-arg="sessions">How to fix</button></div>';
+  else if(!S.sessions.length)list='<div class="card empty" style="padding:24px"><div class="eic">⌁</div><h3>No sessions running</h3><button class="btn p" data-act="new-session">New session</button></div>';
+  else list='<div class="card boxlist">'+sorted().map(sessionRow).join('')+'</div>';
+  var ps=projSplit(),max=ps[0][1]||1,pct=S.spend/S.budget*100;
+  var right=S.firstRun?'<div class="card empty" style="padding:24px"><p>Spend appears here once Claude Code writes its first transcript.</p></div>':
+    '<div class="card budget"><div style="display:flex;justify-content:space-between"><span>Daily budget</span><b class="tn">'+money(S.spend)+' / '+money(S.budget)+'</b></div><div class="trk'+(pct>100?' over':'')+'"><i style="width:'+Math.min(pct,100)+'%"></i></div><small style="color:var(--w-muted)">'+(pct>100?'Over budget by '+money(S.spend-S.budget):'At $'+S.burn.toFixed(2)+'/h you reach it at '+eta())+'</small></div>'+
+    '<div class="card projbars"><span class="cap">Today by project</span>'+ps.map(function(p){return '<div class="pb"><span>'+p[0]+'</span><span><i style="width:'+(p[1]/max*100)+'%;background:'+p[2]+'"></i></span><span>'+money(p[1])+'</span></div>'}).join('')+'<button class="btn ghost" style="justify-self:start" data-act="page" data-arg="spend">Open receipts</button></div>';
+  h+='<div class="cols2"><div style="display:grid;gap:6px"><span class="cap">Sessions</span>'+list+'</div><div style="display:grid;gap:10px">'+right+'</div></div>';return h}
+function eta(){if(S.burn<=0)return 'never';var hrs=(S.budget-S.spend)/S.burn,t=14.53+hrs;if(t>=24)return 'tomorrow';var hh=Math.floor(t),mm=Math.round((t-hh)*60);if(mm===60){hh++;mm=0}return (hh<10?'0':'')+hh+':'+(mm<10?'0':'')+mm}
+function stepsHTML(s){return '<ul class="steps">'+JSTEPS.map(function(t,i){var cls=i<s.jstep?'done':(i===s.jstep?(s.jfail?'fail':'now'):'todo');return '<li class="'+cls+'">'+(cls==='now'?'<span class="spin"></span>':'')+esc(t.replace('{p}',s.project))+(cls==='fail'?' · failed, closing anyway':'')+'</li>'}).join('')+'</ul>'}
+function ccard(s){var m=META[s.state],h='<div class="card ccard st-'+s.state+'"><div class="top"><span class="glyph g-'+s.state+'">'+m.g+'</span><b>'+esc(tname(s))+'</b><span class="pill p-'+s.state+'">'+m.label+'</span></div>';
+  h+='<div class="meta"><span>'+esc(s.project)+'</span><span>'+(s.state==='launching'?'starting…':fmtAge(s.age))+'</span><span>'+money(s.cost)+'</span>'+(s.attached?'<span>● attached</span>':'')+'</div>';
+  if(s.state==='waiting'&&s.prompt){h+='<div class="q">'+esc(s.prompt.q)+'<ol>'+s.prompt.opts.map(function(o,i){return '<li>'+(i+1)+'. '+esc(o)+'</li>'}).join('')+'</ol></div><div class="acts">'+s.prompt.opts.map(function(o,i){return '<button class="btn'+(i===0?' p':'')+'" data-act="answer" data-arg="'+s.id+':'+i+'">'+(i+1)+' · '+esc(o.split(',')[0])+'</button>'}).join('')+'<button class="btn ghost" data-act="focus" data-arg="'+s.id+'">Open terminal</button></div>'}
+  else if(s.state==='running'){h+='<div class="tool"><span class="blink">●</span> '+esc(s.tool||'Working')+'</div>'}
+  else if(s.state==='journaling'){h+=stepsHTML(s)}
+  else if(s.state==='launching'){h+='<div class="tool" style="color:var(--w-muted)"><span class="spin" style="width:10px;height:10px;border-color:var(--w-line);border-top-color:var(--w-fg)"></span> Opening Terminator…</div>'}
+  if(s.state!=='waiting'&&s.state!=='journaling'&&s.state!=='launching')h+='<div class="acts"><button class="btn" data-act="focus" data-arg="'+s.id+'">Focus</button><button class="btn ghost" data-act="retitle" data-arg="'+s.id+'">⟳ Title</button><button class="btn ghost" data-act="close-session" data-arg="'+s.id+'">Close…</button></div>';
+  return h+'</div>'}
+function bcard(s){var dr=s.state!=='launching'&&s.state!=='journaling';return '<div class="card bcard st-'+s.state+'" '+(dr?'draggable="true" ':'')+'data-drag="'+s.id+'" title="Drag to the drop zone to journal & close"><b>'+esc(tname(s))+'</b><small><span>'+esc(s.project)+'</span><span>'+(s.state==='launching'?'starting…':(s.state==='waiting'?fmtAge(4)+' waiting':money(s.cost)))+'</span></small>'+(s.state==='running'?'<small class="tool" style="color:var(--w-run)">'+esc(s.tool||'')+'</small>':'')+'</div>'}
+function sessionsHTML(){var c=counts(),h='<div class="toolbar"><div class="seg" role="tablist"><button class="'+(S.sview==='cockpit'?'on':'')+'" data-act="sview" data-arg="cockpit">Cockpit</button><button class="'+(S.sview==='board'?'on':'')+'" data-act="sview" data-arg="board">Board</button></div><span class="sp"></span>'+
+  '<button class="btn ghost" data-act="close-all"'+(S.sessions.length&&S.tmuxOk?'':' disabled')+'>Close all…</button><button class="btn p" data-act="new-session"'+(S.tmuxOk?'':' disabled')+'>＋ New session</button></div>';
+  if(!S.tmuxOk)return h+'<div class="card empty"><div class="eic">!</div><h3>tmux isn’t installed</h3><p>smartPanel manages Claude sessions that run inside tmux. Install it, then check again.</p><span class="code">sudo apt install tmux <button class="btn" data-act="copy" data-arg="sudo apt install tmux">Copy</button></span><button class="btn p" data-act="retry-tmux">Check again</button></div>';
+  if(!S.sessions.length)return h+'<div class="card empty"><div class="eic">⌁</div><h3>No Claude sessions running</h3><p>Sessions you start here run inside tmux as <code>claude-&lt;project&gt;</code>, so the panel can see what they’re doing, focus them, and journal them on close.</p><button class="btn p" data-act="new-session">＋ New session</button></div>';
+  if(S.sview==='cockpit')return h+'<div class="cockpit">'+sorted().map(ccard).join('')+'</div>';
+  var cols=[['waiting','❓ Needs you','g-waiting'],['running','▶ Running','g-running'],['idle','· Idle','g-idle']];
+  h+='<div class="board">'+cols.map(function(col){var list=S.sessions.filter(function(s){return s.state===col[0]||(col[0]==='idle'&&s.state==='launching')});return '<div class="col"><h4><span class="'+col[2]+'">'+col[1]+'</span><span>'+list.length+'</span></h4>'+(list.length?list.map(bcard).join(''):'<div class="colempty">Nothing here</div>')+'</div>'}).join('')+'</div>';
+  var jr=S.sessions.filter(function(s){return s.state==='journaling'});
+  h+='<div class="dropzone" id="dropzone"><span>Drop a card here to <b>journal &amp; close</b> it</span>'+jr.map(function(s){return '<div class="card"><b>'+esc(tname(s))+'</b>'+stepsHTML(s)+'</div>'}).join('')+'</div>';return h}
+var PAST=[['Mon 16 Nov',[12.4,9.1,6.0,3.52]],['Sun 15 Nov',[2.9,1.2,0,0]],['Sat 14 Nov',[0,0,0,0]],['Fri 13 Nov',[10.2,9,5,3.46]],['Thu 12 Nov',[9.1,6.2,5,2.18]],['Wed 11 Nov',[13,10,6,4]],['Tue 10 Nov',[11,8,7,2]],['Mon 9 Nov',[15,9,4,3]],['Sun 8 Nov',[3,1,0,.1]],['Sat 7 Nov',[0,0,0,0]],['Fri 6 Nov',[12,7,6,2.7]],['Thu 5 Nov',[13,9,6,3]],['Wed 4 Nov',[8,6,5,1]]];
+function daysData(){var ps=projSplit();var d=[['Today · Tue 17 Nov',ps.map(function(p){return p[1]})]].concat(PAST);return d.map(function(x){return {label:x[0],proj:x[1],total:x[1].reduce(function(a,b){return a+b},0)}})}
+function spendHTML(){
+  if(S.loading){var pct=S.loading.done/S.loading.total*100;return '<div class="card empty"><div class="eic"><span class="spin" style="width:26px;height:26px;border-width:3px;border-color:var(--w-line);border-top-color:#e95420"></span></div><h3>Reading your transcripts</h3><p>'+S.loading.done.toLocaleString('en-US')+' of '+S.loading.total.toLocaleString('en-US')+' session files in ~/.claude/projects. Later refreshes only re-read files that changed.</p><div class="trk" style="width:260px"><i style="width:'+pct+'%"></i></div></div>'}
+  if(S.firstRun)return '<div class="card empty"><div class="eic">🧾</div><h3>No Claude Code usage yet</h3><p>smartPanel reads the transcripts Claude Code writes to <code>~/.claude/projects/</code>. Start a session and the first receipt appears within 15 seconds.</p><button class="btn p" data-act="new-session">＋ New session</button></div>';
+  var days=daysData(),d=days[S.day]||days[0],max=Math.max.apply(null,days.map(function(x){return x.total}).concat([1])),pn=['smartPanel','tacomap','JobScout','ledgerly'];
+  var h='<div class="spendhead"><div class="card"><span class="cap">Today</span><b>'+money(S.spend)+'</b></div><div class="card"><span class="cap">This week</span><b>'+money(S.week)+'</b></div><div class="card"><span class="cap">Lifetime</span><b>'+money(S.life)+'</b></div><div class="card"><span class="cap">Cache hits</span><b>'+S.cache+'%</b></div></div>';
+  h+='<div class="recv"><div class="card days">'+days.map(function(x,i){return '<button class="day'+(i===S.day?' sel':'')+'" data-act="day" data-arg="'+i+'"><span>'+x.label.replace('Today · ','Today ')+'</span><span>'+x.total.toFixed(2)+'</span><i style="width:'+(x.total/max*100)+'%"></i></button>'}).join('')+'</div>';
+  var p='<div class="c" style="font-weight:700;letter-spacing:.15em">CLAUDE CODE</div><div class="c m">'+esc(d.label.replace('Today · ','').toUpperCase())+' 2026'+(S.day===0?' · 14:32':'')+'</div><div class="dash"></div>';
+  if(d.total===0)p+='<div class="c m" style="padding:18px 0">NO USAGE THIS DAY</div>';
+  else{d.proj.forEach(function(v,i){if(v>0)p+='<div class="l"><span>'+pn[i]+'</span><span>'+v.toFixed(2)+'</span></div>'});
+    p+='<div class="dash"></div><div class="l m"><span> Opus 5.5</span><span>'+(d.total*.822).toFixed(2)+'</span></div><div class="l m"><span> Sonnet 5.5</span><span>'+(d.total*.164).toFixed(2)+'</span></div><div class="l m"><span> Haiku 5.5</span><span>'+(d.total*.014).toFixed(2)+'</span></div>';
+    p+='<div class="dash"></div><div class="l tot"><span>TOTAL USD</span><span>'+d.total.toFixed(2)+'</span></div><div class="l tip"><span>incl. compliments</span><span>'+(d.total*.003).toFixed(2)+'</span></div><div class="l m"><span>  echo of them later</span><span>'+(d.total*.009).toFixed(2)+'</span></div>';
+    p+='<div class="dash"></div><div class="l m"><span>daily budget</span><span>'+S.budget.toFixed(2)+'</span></div><div class="l m"><span>'+(d.total>S.budget?'over by':'left')+'</span><span>'+Math.abs(S.budget-d.total).toFixed(2)+'</span></div><div class="c m" style="margin-top:8px">'+(d.total/23.84*41.2).toFixed(1)+'M TOKENS · THANK YOU</div>'}
+  return h+'<div class="paperwrap"><div class="paper">'+p+'</div></div></div>'}
+function systemHTML(){var l=S.alert.level,lv=['ok','warn','crit'][l],lt=['Fine','Warning','Critical'][l];
+  function sc(t,v,chip,g,sub,na){return '<div class="card scard'+(na?' na':'')+'"><div class="sh"><span class="cap">'+t+'</span>'+(chip||'')+'</div><div class="sh"><b>'+v+'</b></div>'+g+'<small>'+sub+'</small></div>'}
+  return '<div class="sysgrid" id="live-metrics">'+
+   sc('CPU',Math.round(S.cpu)+'%','',spark(S.hist.cpu,290,46,{max:100}),S.temp+' °C · 8 cores · 15 min history')+
+   sc('Memory',Math.round(S.mem)+'%','',spark(S.hist.mem,290,46,{max:100}),(S.mem/100*16).toFixed(1)+' of 16 GB used')+
+   (S.noSwap?sc('Swap','—','<span class="lvlchip na">Not configured</span>','<svg width="290" height="46"></svg>','This machine has no swap, so it never alerts. RAM full means the OOM killer, not a slowdown.',true):
+   sc('Swap',Math.round(S.swap)+'%','<span class="lvlchip '+lv+'">'+lt+'</span>',spark(S.hist.swap,290,46,{max:100,th:[[S.th.warn,'w'],[S.th.crit,'c']]}),(S.swap/100*S.swapTotal).toFixed(1)+' of '+S.swapTotal+' GB · warns at '+S.th.warn+'%, critical at '+S.th.crit+'%'))+
+   sc('Disk','41%','','<div class="trk"><i style="width:41%"></i></div>','196 of 476 GB on /')+
+   sc('Network','↓ '+S.down.toFixed(1)+' MB/s','',spark([.2,.4,.3,1.2,2.8,2.1,.6,.4,.9,2.2,3.1,2.4],290,46),'↑ '+(S.up*1000).toFixed(0)+' KB/s · wlp2s0')+
+   sc('GPU','—','<span class="lvlchip na">No sensor</span>','<svg width="290" height="46"></svg>','No NVIDIA or AMD GPU found. The row hides itself in the menu.',true)+'</div>'}
+function journalHTML(){if(!S.journal.length)return '<div class="card empty"><div class="eic">📓</div><h3>No journal entries yet</h3><p>Close a session that has been open for more than '+S.settings.minAge+' minutes and smartPanel writes one here.</p></div>';
+  var j=S.journal[clamp(S.jsel,0,S.journal.length-1)];
+  var h='<div class="jl"><div class="card jlist">'+S.journal.map(function(e,i){return '<button class="jrow'+(i===S.jsel?' sel':'')+'" data-act="jsel" data-arg="'+i+'"><b>'+esc(e.title)+'</b><span class="'+(e.ok?'jok':'jfail')+'">'+(e.ok?'✓ JOURNALED':'RECEIPT ONLY')+'</span><small>'+e.time+' · '+esc(e.project)+' · '+e.dur+'</small></button>'}).join('')+'</div>';
+  h+='<div class="card jdet"><div><span class="cap">'+esc(j.project)+' · today '+j.time+'</span><h3>'+esc(j.title)+'</h3></div><blockquote class="'+(j.ok?'':'f')+'">'+esc(j.line)+'</blockquote><span class="cap">Activity</span><dl><dt>Duration</dt><dd>'+j.dur+'</dd><dt>Files</dt><dd>'+j.files.map(esc).join('<br>')+'</dd><dt>Commands</dt><dd>'+j.cmds.map(esc).join('<br>')+'</dd><dt>Tools</dt><dd>'+j.tools+'</dd></dl><div class="path">~/.claude/smartpanel/journals/2026-11-17-'+j.time.replace(':','')+'-'+esc(j.project)+'.md</div></div></div>';return h}
+function sw(path,on,label){return '<button class="sw'+(on?' on':'')+'" role="switch" aria-checked="'+on+'" aria-label="'+label+'" data-act="toggle" data-arg="'+path+'"></button>'}
+function prow(t,sub,ctrl){return '<div class="prow"><div class="pl"><b>'+t+'</b><small>'+sub+'</small></div>'+ctrl+'</div>'}
+function settingsHTML(){var st=S.settings;
+  return '<div class="pgroup"><span class="cap">Top bar</span><div class="card"><div class="preview"><span class="ind">'+barInner(S.bar)+'</span></div>'+
+   prow('Session strip <code>A6</code>','One block per session, coloured by what it’s doing',sw('bar.strip',S.bar.strip,'Session strip'))+
+   prow('Live graphs <code>A4</code>','CPU histogram, memory and swap meters',sw('bar.graphs',S.bar.graphs,'Live graphs'))+
+   prow('Numbers <code>A1</code>','swap · sessions/waiting · today’s dollars',sw('bar.text',S.bar.text,'Numbers'))+
+   prow('Rotate readings <code>A5</code>','Replaces the numbers with one reading every 5 s. Alerts pin themselves.',sw('bar.ticker',S.bar.ticker,'Rotate readings'))+'</div></div>'+
+  '<div class="pgroup"><span class="cap">Swap alert</span><div class="card">'+
+   prow('Warning at','Badge in the bar and one notification',' <input type="range" id="set-warn" min="20" max="95" value="'+S.th.warn+'" data-set="th.warn"><output>'+S.th.warn+'%</output>')+
+   prow('Critical at','Repeats every 10 minutes while it lasts','<input type="range" id="set-crit" min="25" max="99" value="'+S.th.crit+'" data-set="th.crit"><output>'+S.th.crit+'%</output>')+'</div></div>'+
+  '<div class="pgroup"><span class="cap">Spending</span><div class="card">'+prow('Daily budget','Shown on Overview and on every receipt','<input type="number" id="set-budget" min="1" step="1" value="'+S.budget+'" data-set="budget">')+'</div></div>'+
+  '<div class="pgroup"><span class="cap">Sessions</span><div class="card">'+
+   prow('Journal before closing','Runs /journal in the session, then closes it',sw('settings.journal',st.journal,'Journal before closing'))+
+   prow('Only if open longer than','Shorter sessions close straight away','<input type="number" id="set-minage" min="0" value="'+st.minAge+'" data-set="settings.minAge"> <small style="color:var(--w-muted)">min</small>')+
+   prow('Auto-confirm after','The journal dialog says yes on its own','<input type="number" id="set-confirm" min="1" value="'+st.confirmS+'" data-set="settings.confirmS"> <small style="color:var(--w-muted)">s</small>')+
+   prow('Re-attach if focus fails','Opens a fresh terminal on Wayland, closing the old one',sw('settings.reattach',st.reattach,'Re-attach'))+
+   prow('New sessions start in','Folder picker opens here','<input type="text" id="set-dir" value="'+esc(st.dir)+'" data-set="settings.dir" style="width:130px">')+'</div></div>'+
+  '<div class="pgroup"><span class="cap">Desktop</span><div class="card">'+
+   prow('Desktop HUD <code>B6</code>','Spend and sessions drawn on the wallpaper',sw('hud',S.hud,'Desktop HUD'))+
+   prow('Command palette shortcut <code>B5</code>','Set it in GNOME Settings → Keyboard; apps can’t grab keys on Wayland','<span class="code">'+esc(st.shortcut)+'</span>')+'</div></div>'+
+  '<div class="pgroup"><span class="cap">Appearance</span><div class="card">'+prow('Window style','Follows GNOME’s dark style by default','<div class="seg"><button class="'+(S.wtheme==='light'?'on':'')+'" data-act="wtheme" data-arg="light">Light</button><button class="'+(S.wtheme==='dark'?'on':'')+'" data-act="wtheme" data-arg="dark">Dark</button></div>')+'</div></div>'}
+function bannerHTML(){var l=S.alert.level;if(!l)return '';return '<div class="banner '+lvlName()+'" role="alert"><span><b>'+(l===2?'Swap is critically full':'Swap is filling up')+'</b> · '+Math.round(S.swap)+'% used ('+(S.swap/100*S.swapTotal).toFixed(1)+' of '+S.swapTotal+' GB). Close something heavy before the system stalls.</span>'+(S.page!=='system'?'<button data-act="page" data-arg="system">Open System</button>':'')+'</div>'}
+function dialogHTML(){var d=S.dialog;if(!d)return '';var h='';
+  if(d.type==='journal'){var s=find(d.id);if(!s)return '';h='<h3>Journal “'+esc(tname(s))+'” before closing?</h3><p>It has been open '+fmtAge(s.age)+'. smartPanel types <code>/journal '+esc(s.project)+'</code> into the session, waits for the entry, then closes it.</p><div class="dbtns"><button class="btn" data-act="journal-no">Close without</button><button class="btn p" data-act="journal-yes" id="dlg-yes">Journal &amp; close ('+d.left+')</button></div>'}
+  else if(d.type==='closeAll'){var n=S.sessions.length,lj=S.sessions.filter(function(s){return s.age>=S.settings.minAge}).length;h='<h3>Close all '+n+' sessions?</h3><p>'+(S.settings.journal?lj+' of them get a journal entry first, one at a time, because they share one monthly log. ':'Journaling is off, so they close straight away. ')+'Running work is interrupted.</p><div class="dbtns"><button class="btn" data-act="dialog-cancel" id="dlg-cancel">Cancel</button><button class="btn d" data-act="close-all-yes">Close all</button></div>'}
+  else if(d.type==='new'&&d.step==='pick'){h='<h3>New Claude session</h3><div class="crumbs">'+esc(S.settings.dir)+' /</div><div class="dirs">'+PROJECTS.map(function(p){return '<button class="dir'+(d.dir===p?' sel':'')+'" data-act="pick-dir" data-arg="'+p+'"><svg class="ico"><use href="#i-folder"/></svg>'+p+'</button>'}).join('')+'</div><p>Opens Terminator running Claude inside tmux, in <code>'+esc(S.settings.dir)+'/'+esc(d.dir)+'</code>.</p><div class="dbtns"><button class="btn" data-act="dialog-cancel">Cancel</button><button class="btn p" data-act="new-open" id="dlg-open">Open</button></div>'}
+  else if(d.type==='new'&&d.step==='launch'){h='<div class="launch"><span class="spin"></span><h3>Opening Terminator</h3><p>claude-tmux in '+esc(S.settings.dir)+'/'+esc(d.dir)+'</p></div>'}
+  return '<div class="scrim"><div class="dialog '+d.type+'" role="dialog" aria-modal="true">'+h+'</div></div>'}
+function windowHTML(){if(!S.win)return '';var c=counts(),l=S.alert.level;
+  var nav=PAGES.map(function(p){var b='';if(p[0]==='sessions'&&c.waiting)b='<em>'+c.waiting+'</em>';if(p[0]==='sessions'&&!S.tmuxOk)b='<em class="crit">!</em>';if(p[0]==='system'&&l)b='<em class="'+(l===2?'crit':'')+'">'+(l===2?'!':'·')+'</em>';
+    return '<button class="nav'+(S.page===p[0]?' sel':'')+'" data-act="page" data-arg="'+p[0]+'"><svg class="ico"><use href="#'+p[2]+'"/></svg>'+p[1]+b+'</button>'}).join('');
+  var body={overview:overviewHTML,sessions:sessionsHTML,spend:spendHTML,system:systemHTML,journal:journalHTML,settings:settingsHTML}[S.page]();
+  var title={overview:'Overview',sessions:'Sessions',spend:'Spend',system:'System',journal:'Journal',settings:'Settings'}[S.page];
+  return '<div class="win '+S.wtheme+'"><aside class="side"><div class="stt"><i></i>smartPanel</div>'+nav+'<div class="sfoot">'+(S.loading?'Reading transcripts…':'Updated 3 s ago')+'<br>v0.4 · Ubuntu 24.04</div></aside>'+
+   '<section class="main"><div class="hb">'+title+'<span class="hbr"><button class="ib" data-act="palette" title="Command palette (Ctrl+K)"><svg class="ico"><use href="#i-search"/></svg></button><button class="ib x" data-act="close-window" title="Close window" aria-label="Close window">✕</button></span></div>'+bannerHTML()+'<div class="content">'+body+'</div>'+toastHTML()+'</section>'+dialogHTML()+'</div>'}
+function toastHTML(){if(!S.toast)return '';return '<div class="toast'+(S.toast.err?' err':'')+'" role="status">'+esc(S.toast.text)+(S.toast.act?'<button data-act="'+S.toast.act[1]+'"'+(S.toast.act[2]?' data-arg="'+S.toast.act[2]+'"':'')+'>'+S.toast.act[0]+'</button>':'')+'</div>'}
+function hudHTML(){if(!S.hud)return '';var l=S.alert.level,ss=sorted();
+  var rows=!S.tmuxOk?'<div><span>tmux not installed</span><span class="hcrit">!</span></div>':(ss.length?ss.slice(0,6).map(function(s){return '<div><span>'+esc(tname(s))+'</span><span class="h-'+s.state+'">'+META[s.state].label.toLowerCase()+'</span></div>'}).join('')+(ss.length>6?'<div><span>+'+(ss.length-6)+' more</span><span></span></div>':''):'<div><span>No sessions</span><span></span></div>');
+  return '<div class="hud" aria-label="Desktop HUD"><div class="hl">Claude · today</div><div class="hbig">'+(S.loading?'…':(S.firstRun?'—':S.spend.toFixed(2)))+'</div><div class="hl" style="margin-top:4px">usd · '+S.tokens+'M tokens · '+S.burn.toFixed(2)+'/h</div><div class="hrows">'+rows+'</div>'+
+   '<div class="hrows" style="margin-top:12px"><div><span>cpu</span><span>'+Math.round(S.cpu)+'%</span></div><div><span>memory</span><span>'+Math.round(S.mem)+'%</span></div><div><span>swap</span><span class="'+(l===2?'hcrit':l===1?'hwarn':'')+'">'+(S.noSwap?'—':Math.round(S.swap)+'%')+'</span></div><div><span>net ↓</span><span>'+S.down.toFixed(1)+' MB/s</span></div></div>'+(l?'<div class="halert">⚠ swap '+(l===2?'critical':'high')+'</div>':'')+'</div>'}
+function notifsHTML(){if(!S.notifs.length)return '';return '<div class="notifs" aria-live="polite">'+S.notifs.map(function(n){return '<div class="notif '+n.kind+'"><span class="nic"><svg class="ico"><use href="#i-bell"/></svg></span><div><small>smartPanel · now</small><b>'+esc(n.title)+'</b><p>'+esc(n.body)+'</p></div><button data-act="notif-close" data-arg="'+n.id+'" aria-label="Dismiss">✕</button></div>'}).join('')+'</div>'}
+var PAL=[];
+function paletteItems(){var it=[],c=counts();
+  S.sessions.forEach(function(s){if(s.state==='waiting')it.push({g:'❓',t:'Answer · '+tname(s),sub:s.project,k:'⏎',run:function(){go('sessions');S.sview='cockpit'}})});
+  S.sessions.forEach(function(s){if(s.state!=='journaling'&&s.state!=='launching')it.push({g:META[s.state].g,t:'Focus · '+tname(s),sub:s.project,run:function(){focusS(s.id)}})});
+  S.sessions.forEach(function(s){if(s.state!=='journaling'&&s.state!=='launching')it.push({g:'✎',t:'Journal & close · '+tname(s),sub:s.project,run:function(){startClose(s.id)}})});
+  it.push({g:'＋',t:'New session…',run:newSession});
+  if(S.sessions.length)it.push({g:'✕',t:'Close all sessions…',run:function(){S.win=true;S.dialog={type:'closeAll'}}});
+  PAGES.forEach(function(p){it.push({g:'→',t:'Go to '+p[1],run:function(){go(p[0])}})});
+  it.push({g:'◐',t:(S.hud?'Hide':'Show')+' desktop HUD',run:function(){S.hud=!S.hud}});
+  it.push({g:'↻',t:(S.bar.ticker?'Stop':'Start')+' rotating the top bar',run:function(){S.bar.ticker=!S.bar.ticker}});
+  it.push({g:'📄',t:'Open JOURNAL/2026-11.md',run:function(){toast('Opened JOURNAL/2026-11.md in the default editor')}});
+  var q=S.pq.trim().toLowerCase();if(!q)return it;
+  return it.filter(function(x){var t=x.t.toLowerCase(),i=0;for(var j=0;j<t.length&&i<q.length;j++)if(t[j]===q[i])i++;return i===q.length}).sort(function(a,b){return (a.t.toLowerCase().indexOf(q)<0)-(b.t.toLowerCase().indexOf(q)<0)})}
+function hl(t){var q=S.pq.trim();if(!q)return esc(t);var i=t.toLowerCase().indexOf(q.toLowerCase());if(i<0)return esc(t);return esc(t.slice(0,i))+'<mark>'+esc(t.slice(i,i+q.length))+'</mark>'+esc(t.slice(i+q.length))}
+function paletteHTML(){if(!S.palette)return '';PAL=paletteItems();S.psel=clamp(S.psel,0,Math.max(0,PAL.length-1));var c=counts();
+  return '<div class="palscrim" data-act="palette-close"></div><div class="pal" role="dialog" aria-label="Command palette"><div class="pin"><svg class="ico" style="width:18px;height:18px;color:#999"><use href="#i-search"/></svg><input id="pal-input" autocomplete="off" placeholder="Type a session or an action…" value="'+esc(S.pq)+'" aria-label="Search"><kbd>Esc</kbd></div>'+
+   '<div class="plist" role="listbox">'+(PAL.length?PAL.slice(0,9).map(function(x,i){return '<button class="pi'+(i===S.psel?' sel':'')+'" role="option" aria-selected="'+(i===S.psel)+'" data-act="pal-run" data-arg="'+i+'"><span class="pg">'+x.g+'</span><span>'+hl(x.t)+'</span>'+(x.sub?'<small>'+esc(x.sub)+'</small>':'')+(i===S.psel?'<kbd>⏎</kbd>':'')+'</button>'}).join(''):'<div class="pnone">Nothing matches “'+esc(S.pq)+'”</div>')+'</div>'+
+   '<div class="pstat"><span>Swap '+(S.noSwap?'—':Math.round(S.swap)+'%')+'</span><span>'+S.sessions.length+' sessions'+(c.waiting?' · '+c.waiting+' waiting':'')+'</span><span>'+(S.firstRun?'no spend yet':money(S.spend)+' today')+'</span><span style="margin-left:auto">↑↓ move · ⏎ run</span></div></div>'}
+
+/* ───── render ───── */
+function deskHTML(){return '<div class="dock"><i></i><i></i><i></i><i></i><i></i></div>'+hudHTML()+windowHTML()+topbarHTML()+menuHTML()+notifsHTML()+paletteHTML()}
+function renderDesk(){var ae=document.activeElement,id=ae&&desk.contains(ae)?ae.id:null,ss=null;try{ss=ae&&ae.selectionStart}catch(e){}
+  var sc=desk.querySelector('.content'),top=sc?sc.scrollTop:0,pg=S.page;
+  desk.innerHTML=deskHTML();
+  var nc=desk.querySelector('.content');if(nc&&renderDesk.lastPage===pg)nc.scrollTop=top;renderDesk.lastPage=pg;
+  if(id){var n=document.getElementById(id);if(n){n.focus({preventScroll:true});if(ss!=null&&n.setSelectionRange){try{n.setSelectionRange(ss,ss)}catch(e){}}}}
+  else if(S.palette){var pi=document.getElementById('pal-input');if(pi){pi.focus({preventScroll:true});pi.setSelectionRange(pi.value.length,pi.value.length)}}
+  else if(S.dialog){var b=document.getElementById('dlg-yes')||document.getElementById('dlg-open')||document.getElementById('dlg-cancel');if(b&&!desk.contains(document.activeElement))b.focus({preventScroll:true})}}
+function renderLive(){if(dragging)return;var t=desk.querySelector('.topbar');if(t){var f=document.activeElement&&document.activeElement.id==='ind';t.outerHTML=topbarHTML();if(f)document.getElementById('ind').focus({preventScroll:true})}
+  var h=desk.querySelector('.hud');if(h)h.outerHTML=hudHTML();
+  var lm=desk.querySelector('#live-metrics');if(lm&&(S.page==='overview'||S.page==='system')){var tmp=document.createElement('div');tmp.innerHTML=S.page==='overview'?metricsHTML():systemHTML();lm.replaceWith(tmp.firstChild)}
+  var pv=desk.querySelector('.preview .ind');if(pv)pv.innerHTML=barInner(S.bar)}
+var ctlBusy=false,ctlPending=false;
+function renderAll(){renderDesk();if(ctlBusy)ctlPending=true;else renderCtl()}
+
+/* ───── actions ───── */
+var toastT=null;
+function toast(text,opt){opt=opt||{};S.toast={text:text,err:!!opt.err,act:opt.act||null};clearTimeout(toastT);toastT=setTimeout(function(){S.toast=null;renderDesk()},opt.ms||4200)}
+var nid=1;
+function notify(title,body,kind){var n={id:'n'+(nid++),title:title,body:body,kind:kind||''};S.notifs=[n].concat(S.notifs).slice(0,3);setTimeout(function(){S.notifs=S.notifs.filter(function(x){return x.id!==n.id});renderDesk()},6500)}
+function go(p){S.win=true;S.page=p;S.menu=false}
+function focusS(id){var s=find(id);if(!s)return;s.attached=true;S.menu=false;
+  if(S.ctl.focusRoute==='raise')toast('Raised the terminal for “'+tname(s)+'”');
+  else if(S.settings.reattach)toast('Re-attached “'+tname(s)+'” in a new terminal. The old window closed.');
+  else toast('Couldn’t raise the terminal. Turn on re-attach in Settings.',{err:true,act:['Settings','page','settings']})}
+var countdownT=null;
+function startClose(id){var s=find(id);if(!s||s.state==='journaling'||s.state==='launching')return;S.win=true;S.menu=false;S.palette=false;
+  if(S.settings.journal&&s.age>=S.settings.minAge){S.dialog={type:'journal',id:id,left:S.settings.confirmS};clearInterval(countdownT);
+    countdownT=setInterval(function(){if(!S.dialog||S.dialog.type!=='journal'){clearInterval(countdownT);return}S.dialog.left--;if(S.dialog.left<=0){clearInterval(countdownT);journalYes()}else{var b=document.getElementById('dlg-yes');if(b)b.textContent='Journal & close ('+S.dialog.left+')'}},1000)}
+  else closeNow(id,S.settings.journal?'Closed “'+tname(s)+'”. Open under '+S.settings.minAge+' min, so no journal.':'Closed “'+tname(s)+'”.');
+  renderAll()}
+function closeNow(id,msg){var s=find(id);S.sessions=S.sessions.filter(function(x){return x.id!==id});toast(msg||('Closed “'+(s?tname(s):'')+'”'))}
+function journalYes(){var d=S.dialog;clearInterval(countdownT);S.dialog=null;if(d&&d.id)runJournal(d.id);renderAll()}
+function runJournal(id){return new Promise(function(res){var s=find(id);if(!s)return res();var busy=s.state!=='idle';s.state='journaling';s.jstep=0;s.jfail=false;renderAll();
+  var delays=[busy?2400:800,1200,2000,700,600],i=0;
+  function finish(failed){var cur=find(id);if(!cur)return res();S.sessions=S.sessions.filter(function(x){return x.id!==id});
+    var mins=34+Math.floor(Math.random()*20);
+    S.journal.unshift({id:'j'+Date.now(),time:'14:'+mins,title:tname(cur),project:cur.project,ok:!failed,dur:fmtAge(cur.age),line:failed?'The /journal skill returned no confirmation line. The session was still closed; this receipt holds the Activity section only.':'Journaled '+cur.project+' to JOURNAL/2026-11.md. '+tname(cur)+': what landed, what was decided, and what is still open.',files:['src/'+cur.project.toLowerCase()+'/main.go','README.md'],cmds:['make test'],tools:'Read 9 · Edit 4 · Bash 3'});
+    S.jsel=0;
+    if(failed){notify('Journal failed · '+tname(cur),'The session was closed anyway. A receipt with its activity was saved.','crit');toast('Closed. The journal failed, receipt saved.',{err:true,act:['View','page','journal']})}
+    else{notify('Journal written · '+tname(cur),'Appended to JOURNAL/2026-11.md. Session closed.','ok');toast('Journaled & closed “'+tname(cur)+'”',{act:['View','page','journal']})}
+    renderAll();res()}
+  function step(){var cur=find(id);if(!cur)return res();
+    if(i===2&&S.ctl.journalFails){cur.jfail=true;renderAll();setTimeout(function(){finish(true)},1500);return}
+    i++;cur.jstep=i;renderAll();if(i>=JSTEPS.length)return finish(false);setTimeout(step,delays[i])}
+  setTimeout(step,delays[0])})}
+function closeAllYes(){S.dialog=null;var ids=S.sessions.map(function(s){return s.id});renderAll();
+  (function next(k){if(k>=ids.length){toast('All sessions closed');renderAll();return}var s=find(ids[k]);if(!s)return next(k+1);
+    if(S.settings.journal&&s.age>=S.settings.minAge)runJournal(s.id).then(function(){next(k+1)});else{closeNow(s.id);renderAll();setTimeout(function(){next(k+1)},300)}})(0)}
+function newSession(){S.win=true;S.menu=false;S.palette=false;if(!S.tmuxOk){go('sessions');toast('Install tmux first',{err:true});return}S.dialog={type:'new',step:'pick',dir:'ledgerly'}}
+function newOpen(){var dir=S.dialog.dir;
+  if(S.ctl.terminalMissing){S.dialog=null;toast('Couldn’t open Terminator. Install it, or set SMARTPANEL_TERMINAL.',{err:true,ms:6000});return}
+  S.dialog={type:'new',step:'launch',dir:dir};
+  setTimeout(function(){if(!S.dialog||S.dialog.step!=='launch')return;S.dialog=null;var s=mkS('',dir,'launching',0,0);S.sessions.push(s);renderAll();
+    setTimeout(function(){var c=find(s.id);if(c&&c.state==='launching'){c.state='idle';c.attached=true;toast('Session started in '+S.settings.dir+'/'+dir);renderAll()}},1800)},1400)}
+function answer(id,i){var s=find(id);if(!s||!s.prompt)return;var o=s.prompt.opts[i];s.prompt=null;
+  if(i===s.prompt_len-1){}s.state=i===2?'idle':'running';s.tool=i===2?null:'Edit · applying your answer';toast('Sent “'+(i+1)+'” to '+tname(s));
+  if(s.state==='running')setTimeout(function(){var c=find(id);if(c&&c.state==='running'&&c.tool==='Edit · applying your answer'){c.state='idle';c.tool=null;renderAll()}},5000)}
+function setPath(path,val){var p=path.split('.'),o=S;for(var i=0;i<p.length-1;i++)o=o[p[i]];o[p[p.length-1]]=val}
+function getPath(path){return path.split('.').reduce(function(o,k){return o[k]},S)}
+function openPalette(){S.palette=true;S.pq='';S.psel=0;S.menu=false}
+function setSwap(v){S.noSwap=false;S.swap=v;S.hist.swap.push(v);S.hist.swap.shift();evalSwap()}
+
+desk.addEventListener('click',function(e){var t=e.target.closest('[data-act]');
+  if(S.menu&&!e.target.closest('.menu')&&!e.target.closest('.ind')){S.menu=false;if(!t){renderAll();return}}
+  if(!t||t.disabled)return;var a=t.dataset.act,g=t.dataset.arg;
+  switch(a){
+    case 'menu':S.menu=!S.menu;break;
+    case 'open-window':S.win=true;S.menu=false;break;
+    case 'close-window':S.win=false;S.dialog=null;break;
+    case 'page':go(g);break;
+    case 'goto-answer':go('sessions');S.sview='cockpit';break;
+    case 'sview':S.sview=g;break;
+    case 'new-session':newSession();break;
+    case 'pick-dir':S.dialog.dir=g;break;
+    case 'new-open':newOpen();break;
+    case 'dialog-cancel':S.dialog=null;break;
+    case 'close-session':startClose(g);return;
+    case 'journal-yes':journalYes();return;
+    case 'journal-no':{clearInterval(countdownT);var d=S.dialog;S.dialog=null;closeNow(d.id,'Closed without a journal entry');break}
+    case 'close-all':S.dialog={type:'closeAll'};break;
+    case 'close-all-yes':closeAllYes();return;
+    case 'answer':{var p=g.split(':');answer(p[0],+p[1]);break}
+    case 'focus':focusS(g);break;
+    case 'retitle':{var s=find(g);if(s){s.retitling=true;setTimeout(function(){s.retitling=false;toast('Title re-read from tmux');renderAll()},700)}break}
+    case 'palette':openPalette();break;
+    case 'palette-close':S.palette=false;break;
+    case 'pal-run':{var it=PAL[+g];S.palette=false;if(it)it.run();break}
+    case 'hud':S.hud=!S.hud;S.menu=false;break;
+    case 'pin':S.pinned=!S.pinned;S.menu=false;break;
+    case 'day':S.day=+g;break;
+    case 'jsel':S.jsel=+g;break;
+    case 'toggle':setPath(g,!getPath(g));if(g==='bar.ticker'&&S.bar.ticker){}break;
+    case 'wtheme':S.wtheme=g;break;
+    case 'notif-close':S.notifs=S.notifs.filter(function(n){return n.id!==g});break;
+    case 'copy':try{navigator.clipboard.writeText(g).then(function(){toast('Copied');renderDesk()},function(){toast('Select the command and copy it')})}catch(err){toast('Select the command and copy it')}break;
+    case 'retry-tmux':toast('tmux still not found on PATH',{err:true});break;
+    case 'noop':break;
+  }
+  renderAll()});
+desk.addEventListener('auxclick',function(e){if(e.button===1&&e.target.closest('.ind')){e.preventDefault();S.win=true;S.menu=false;renderAll()}});
+desk.addEventListener('mousedown',function(e){if(e.button===1&&e.target.closest('.ind'))e.preventDefault()});
+desk.addEventListener('input',function(e){if(e.target.id==='pal-input'){S.pq=e.target.value;S.psel=0;renderDesk()}});
+desk.addEventListener('change',function(e){var k=e.target.dataset.set;if(!k)return;var v=e.target.type==='text'?e.target.value:+e.target.value;
+  if(k==='th.warn'){v=clamp(v,10,95);if(S.th.crit<v)S.th.crit=Math.min(99,v+5)}if(k==='th.crit'&&v<S.th.warn)v=S.th.warn;setPath(k,v);evalSwap();renderAll()});
+desk.addEventListener('keydown',function(e){if(e.target.id!=='pal-input')return;
+  if(e.key==='ArrowDown'){S.psel=Math.min(S.psel+1,Math.min(PAL.length,9)-1);e.preventDefault();renderDesk()}
+  else if(e.key==='ArrowUp'){S.psel=Math.max(S.psel-1,0);e.preventDefault();renderDesk()}
+  else if(e.key==='Enter'){var it=PAL[S.psel];S.palette=false;if(it)it.run();renderAll()}});
+var dragging=null;
+desk.addEventListener('dragstart',function(e){var c=e.target.closest('[data-drag]');if(!c)return;dragging=c.dataset.drag;c.classList.add('dragging');try{e.dataTransfer.setData('text/plain',dragging);e.dataTransfer.effectAllowed='move'}catch(err){}});
+desk.addEventListener('dragend',function(){dragging=null;renderAll()});
+desk.addEventListener('dragover',function(e){var z=e.target.closest('#dropzone');if(z&&dragging){e.preventDefault();z.classList.add('over')}});
+desk.addEventListener('dragleave',function(e){var z=e.target.closest('#dropzone');if(z&&!z.contains(e.relatedTarget))z.classList.remove('over')});
+desk.addEventListener('drop',function(e){var z=e.target.closest('#dropzone');if(!z||!dragging)return;e.preventDefault();var id=dragging;dragging=null;startClose(id)});
+document.addEventListener('keydown',function(e){
+  if((e.ctrlKey||e.metaKey)&&(e.key==='k'||e.key==='K')){e.preventDefault();if(S.palette)S.palette=false;else openPalette();renderAll();return}
+  if(e.key==='Escape'){if(S.palette)S.palette=false;else if(S.dialog&&S.dialog.step!=='launch'){clearInterval(countdownT);S.dialog=null}else if(S.menu)S.menu=false;else return;renderAll()}});
+
+/* ───── scenarios ───── */
+var loadT=null;
+var SCEN={
+  busy:{label:'Busy',desc:'Default afternoon: four sessions, one waiting on you, two running. Swap at 12%.',apply:function(){}},
+  calm:{label:'Calm',desc:'Nothing needs you. Every session is idle and spend is low.',apply:function(){S.sessions.forEach(function(s){s.state='idle';s.prompt=null;s.tool=null});S.spend=8.10;S.cpu=6;S.mem=41;S.burn=.4;S.tokens=14.1;S.hist.cpu=hist(6,6,30);S.hist.mem=hist(41,2,30)}},
+  alert:{label:'Swap alert',desc:'Memory pressure: swap at 88% (critical), two sessions waiting, spend over budget.',apply:function(){S.sessions[3].state='waiting';S.sessions[3].prompt=PROMPT_ASK;S.spend=41.20;S.burn=7.8;S.tokens=72.4;S.cpu=92;S.mem=97;S.hist.cpu=hist(88,10,30);S.hist.mem=hist(96,2,30);S.hist.swap=hist(80,6,28).concat([86,88]);S.swap=88}},
+  empty:{label:'No sessions',desc:'tmux is fine but nothing is running. Shows every empty state.',apply:function(){S.sessions=[]}},
+  many:{label:'Many sessions',desc:'Nine sessions, to stress the strip, menu, board and HUD.',apply:function(){S.sessions=busySessions().concat([mkS('Vendor onboarding copy','tacomap','idle',75,.92),mkS('Advisor dashboard filters','ledgerly','running',22,1.10,{tool:'Read · web/app/advisors/page.tsx'}),mkS('Gift list sharing links','wishlist','waiting',8,.40,{prompt:PROMPT_EDIT}),mkS('Lead scoring prompt','LeadPilot','idle',140,1.75),mkS('WireGuard peer rotation','netConfigs','idle',30,.21)])}},
+  cold:{label:'Cold start',desc:'First launch after login: the aggregator reads every transcript once. Plays out over a few seconds.',apply:function(){S.loading={done:0,total:1284};clearInterval(loadT);loadT=setInterval(function(){if(!S.loading){clearInterval(loadT);return}S.loading.done=Math.min(S.loading.total,S.loading.done+97);if(S.loading.done>=S.loading.total){clearInterval(loadT);S.loading=null;toast('Read 1,284 transcripts')}renderAll()},350)}},
+  first:{label:'First run',desc:'Claude Code has never run here. No transcripts, no sessions.',apply:function(){S.firstRun=true;S.sessions=[];S.spend=0;S.week=0;S.life=0;S.tokens=0;S.burn=0;S.journal=[]}},
+  notmux:{label:'tmux missing',desc:'tmux isn’t installed, so sessions can’t be listed or started.',apply:function(){S.tmuxOk=false;S.sessions=[]}},
+  noswap:{label:'No swap',desc:'A machine with no swap configured. The gauge reads “—” and never alerts.',apply:function(){S.noSwap=true}}};
+function applyScenario(k){clearInterval(loadT);clearInterval(countdownT);
+  var keep={wtheme:S.wtheme,bar:S.bar,hud:S.hud,page:S.page,sview:S.sview,ctl:S.ctl,settings:S.settings,th:S.th,budget:S.budget};
+  S=DEFAULTS();for(var x in keep)S[x]=keep[x];S.scenario=k;SCEN[k].apply();evalSwap();renderAll()}
+function runSessionJournal(){var s=S.sessions.filter(function(x){return x.state==='idle'})[0]||S.sessions.filter(function(x){return x.state!=='journaling'&&x.state!=='launching'})[0];if(!s){toast('No session to journal. Pick a scenario with sessions.',{err:true});return}go('sessions');runJournal(s.id)}
+var SCREENS=[
+ ['Top bar',[['Numbers only · A1',function(){S.bar={strip:false,graphs:false,text:true,ticker:false}}],['Strip + numbers · A6+A1',function(){S.bar={strip:true,graphs:false,text:true,ticker:false}}],['Graphs + numbers · A4+A1',function(){S.bar={strip:false,graphs:true,text:true,ticker:false}}],['Ticker · A5',function(){S.bar={strip:true,graphs:false,text:false,ticker:true}}],['Everything on',function(){S.bar={strip:true,graphs:true,text:true,ticker:false}}],['Bar menu open',function(){S.menu=true}]]],
+ ['Window pages · B1',[['Overview',function(){go('overview')}],['Sessions · Cockpit (B2)',function(){go('sessions');S.sview='cockpit'}],['Sessions · Board (B3)',function(){go('sessions');S.sview='board'}],['Spend · Receipts (B7)',function(){go('spend');S.day=0}],['System',function(){go('system')}],['Journal',function(){go('journal')}],['Settings',function(){go('settings')}]]],
+ ['Dialogs & steps',[['New session · folder picker',function(){newSession()}],['New session · launching',function(){newSession();if(S.dialog)newOpen()}],['Journal confirm (5 s)',function(){var s=sorted().filter(function(x){return x.age>=S.settings.minAge&&x.state!=='journaling'})[0];if(s)startClose(s.id);else toast('No session old enough. Pick Busy.',{err:true})}],['Journaling in progress',runSessionJournal],['Journal failed',function(){S.ctl.journalFails=true;runSessionJournal()}],['Close all confirm',function(){S.win=true;S.dialog={type:'closeAll'}}],['Terminator missing',function(){S.ctl.terminalMissing=true;newSession()}]]],
+ ['Overlays',[['Command palette · B5',openPalette],['Desktop HUD alone · B6',function(){S.win=false;S.hud=true;S.menu=false;S.palette=false}],['Notification',function(){notify('Journal written · Fix swap alert hysteresis','Appended to JOURNAL/2026-11.md. Session closed.','ok')}],['Toast',function(){S.win=true;toast('Re-attached in a new terminal. The old window closed.')}]]],
+ ['States',[['Swap warning',function(){setSwap(66)}],['Swap critical',function(){setSwap(91)}],['Swap recovered',function(){setSwap(20)}],['No sessions',function(){applyScenario('empty')}],['Many sessions',function(){applyScenario('many')}],['tmux missing',function(){applyScenario('notmux')}],['Cold start loading',function(){applyScenario('cold')}],['First run',function(){applyScenario('first')}],['No swap',function(){applyScenario('noswap')}],['Over budget',function(){S.spend=S.budget+6.5;go('overview')}],['Light window',function(){S.wtheme='light'}]]]];
+
+/* ───── control panel ───── */
+function renderCtl(){var c=counts();
+  var h='<section><h3>Scenario</h3><div class="chips">'+Object.keys(SCEN).map(function(k){return '<button class="chip'+(S.scenario===k?' on':'')+'" data-c="scenario" data-arg="'+k+'">'+SCEN[k].label+'</button>'}).join('')+'</div><p class="desc">'+SCEN[S.scenario].desc+'</p></section>';
+  function sl(id,label,key,min,max,step,suf,dis){var v=getPath(key);return '<label class="sl" for="'+id+'"><span>'+label+'</span><input type="range" id="'+id+'" data-bind="'+key+'" min="'+min+'" max="'+max+'" step="'+step+'" value="'+v+'"'+(dis?' disabled':'')+'><output id="'+id+'-o">'+(suf==='$'?'$'+(+v).toFixed(2):Math.round(v)+suf)+'</output></label>'}
+  h+='<section><h3>Live values <span>'+['swap ok','swap warning','swap critical'][S.alert.level]+'</span></h3>'+sl('c-swap','Swap','swap',0,100,1,'%',S.noSwap)+sl('c-cpu','CPU','cpu',0,100,1,'%')+sl('c-mem','Memory','mem',0,100,1,'%')+sl('c-spend','Spend today','spend',0,80,.01,'$')+
+    '<label class="tg"><input type="checkbox" id="c-noswap" data-toggle="noSwap"'+(S.noSwap?' checked':'')+'> No swap configured</label><label class="tg"><input type="checkbox" id="c-live" data-toggle="ctl.live"'+(S.ctl.live?' checked':'')+'> Live jitter (values move every 3 s)</label></section>';
+  h+='<section><h3>Sessions <span>'+S.sessions.length+(c.waiting?' · '+c.waiting+' waiting':'')+'</span></h3>'+(S.tmuxOk?'':'<p class="desc">tmux is missing in this scenario.</p>')+S.sessions.map(function(s){return '<div class="cs"><select id="cs-'+s.id+'" data-sstate="'+s.id+'" aria-label="State of '+esc(tname(s))+'"'+(s.state==='journaling'||s.state==='launching'?' disabled':'')+'>'+['waiting','running','idle'].concat(s.state==='journaling'||s.state==='launching'?[s.state]:[]).map(function(st){return '<option value="'+st+'"'+(s.state===st?' selected':'')+'>'+META[st].g+' '+META[st].label+'</option>'}).join('')+'</select><span title="'+esc(tname(s))+'">'+esc(tname(s))+'</span><button data-c="rm" data-arg="'+s.id+'" aria-label="Remove">✕</button></div>'}).join('')+(S.tmuxOk?'<button class="cbtn" data-c="add">＋ Add a session</button>':'')+'</section>';
+  h+='<section><h3>Top bar</h3>'+[['bar.strip','Session strip','A6'],['bar.graphs','Live graphs','A4'],['bar.text','Numbers','A1'],['bar.ticker','Rotate readings','A5']].map(function(x){return '<label class="tg"><input type="checkbox" id="c-'+x[0].replace('.','-')+'" data-toggle="'+x[0]+'"'+(getPath(x[0])?' checked':'')+'> '+x[1]+'<small>'+x[2]+'</small></label>'}).join('')+'</section>';
+  h+='<section><h3>Surfaces</h3>'+[['win','Dashboard window','B1'],['menu','Bar menu open',''],['hud','Desktop HUD','B6'],['palette','Command palette','B5']].map(function(x){return '<label class="tg"><input type="checkbox" id="c-'+x[0]+'" data-toggle="'+x[0]+'"'+(S[x[0]]?' checked':'')+'> '+x[1]+'<small>'+x[2]+'</small></label>'}).join('')+
+    '<div class="fieldrow"><span>Window style</span><select id="c-wtheme" data-select="wtheme"><option value="dark"'+(S.wtheme==='dark'?' selected':'')+'>Dark</option><option value="light"'+(S.wtheme==='light'?' selected':'')+'>Light</option></select></div></section>';
+  h+='<section><h3>Flows</h3><div class="row2"><button class="cbtn" data-c="flow" data-arg="new">New session</button><button class="cbtn" data-c="flow" data-arg="close">Close with journal</button><button class="cbtn" data-c="flow" data-arg="closeall">Close all</button><button class="cbtn" data-c="flow" data-arg="answer">Answer the prompt</button><button class="cbtn" data-c="flow" data-arg="focus">Focus a session</button><button class="cbtn" data-c="flow" data-arg="palette">Open palette</button><button class="cbtn" data-c="flow" data-arg="swapup">Swap climbs</button><button class="cbtn" data-c="flow" data-arg="swapdown">Swap recovers</button></div>'+
+    '<label class="tg"><input type="checkbox" id="c-jfail" data-toggle="ctl.journalFails"'+(S.ctl.journalFails?' checked':'')+'> Journal skill fails</label><label class="tg"><input type="checkbox" id="c-term" data-toggle="ctl.terminalMissing"'+(S.ctl.terminalMissing?' checked':'')+'> Terminator not installed</label>'+
+    '<div class="fieldrow"><span>Focus result</span><select id="c-route" data-select="ctl.focusRoute"><option value="reattach"'+(S.ctl.focusRoute==='reattach'?' selected':'')+'>Re-attach (stock Wayland)</option><option value="raise"'+(S.ctl.focusRoute==='raise'?' selected':'')+'>Raise (Window Calls / X11)</option></select></div></section>';
+  h+='<section><h3>Every screen &amp; state</h3>'+SCREENS.map(function(g,gi){return '<div class="scr"><b>'+g[0]+'</b><div class="chips">'+g[1].map(function(it,ii){return '<button class="chip" data-c="screen" data-arg="'+gi+':'+ii+'">'+it[0]+'</button>'}).join('')+'</div></div>'}).join('')+'<button class="cbtn" data-c="reset">Reset everything</button></section>';
+  ctl.innerHTML=h}
+var swapAnim=null;
+ctl.addEventListener('click',function(e){var b=e.target.closest('[data-c]');if(!b)return;var c=b.dataset.c,g=b.dataset.arg;
+  if(c==='scenario'){applyScenario(g);return}
+  if(c==='rm'){S.sessions=S.sessions.filter(function(s){return s.id!==g})}
+  if(c==='add'){var p=PROJECTS[Math.floor(Math.random()*PROJECTS.length)];S.sessions.push(mkS('Explore '+p+' tests',p,'idle',5+Math.floor(Math.random()*90),+(Math.random()*3).toFixed(2)))}
+  if(c==='screen'){var p2=g.split(':');S.palette=false;SCREENS[+p2[0]][1][+p2[1]][1]()}
+  if(c==='reset'){clearInterval(loadT);clearInterval(countdownT);S=DEFAULTS();}
+  if(c==='flow'){S.palette=false;
+    if(g==='new')newSession();
+    else if(g==='close'){var s=sorted().filter(function(x){return x.age>=S.settings.minAge&&x.state!=='journaling'&&x.state!=='launching'})[0];if(s){go('sessions');startClose(s.id);return}toast('No session old enough to journal',{err:true})}
+    else if(g==='closeall'){if(S.sessions.length){S.win=true;S.dialog={type:'closeAll'}}else toast('No sessions to close',{err:true})}
+    else if(g==='answer'){var w=S.sessions.filter(function(x){return x.state==='waiting'})[0];if(!w){var cand=S.sessions.filter(function(x){return x.state==='idle'})[0];if(cand){cand.state='waiting';cand.prompt=PROMPT_EDIT}}go('sessions');S.sview='cockpit'}
+    else if(g==='focus'){var f=S.sessions[0];if(f)focusS(f.id);else toast('No session to focus',{err:true})}
+    else if(g==='palette')openPalette();
+    else if(g==='swapup'||g==='swapdown'){clearInterval(swapAnim);var target=g==='swapup'?93:15;S.noSwap=false;swapAnim=setInterval(function(){var d=target-S.swap;if(Math.abs(d)<2){setSwap(target);clearInterval(swapAnim)}else setSwap(Math.round(S.swap+Math.sign(d)*Math.max(2,Math.abs(d)/6)));renderAll()},450)}}
+  renderAll()});
+ctl.addEventListener('input',function(e){var k=e.target.dataset.bind;if(!k)return;var v=+e.target.value;setPath(k,v);
+  if(k==='swap'){S.hist.swap.push(v);S.hist.swap.shift();evalSwap()}
+  if(k==='cpu'){S.hist.cpu.push(v);S.hist.cpu.shift()}if(k==='mem'){S.hist.mem.push(v);S.hist.mem.shift()}
+  var o=document.getElementById(e.target.id+'-o');if(o)o.textContent=k==='spend'?'$'+v.toFixed(2):Math.round(v)+'%';renderDesk()});
+ctl.addEventListener('change',function(e){var t=e.target;
+  if(t.dataset.toggle){var k=t.dataset.toggle;setPath(k,t.checked);if(k==='noSwap')evalSwap();if(k==='palette'&&t.checked){S.pq='';S.psel=0}if(k==='bar.ticker'&&t.checked)S.bar.text=S.bar.text;renderAll()}
+  else if(t.dataset.select){setPath(t.dataset.select,t.value);renderAll()}
+  else if(t.dataset.sstate){var s=find(t.dataset.sstate);if(s){s.state=t.value;if(s.state==='waiting'&&!s.prompt)s.prompt=PROMPT_EDIT;if(s.state!=='waiting')s.prompt=null;if(s.state==='running'&&!s.tool)s.tool='Bash · running tests';if(s.state!=='running')s.tool=null}renderAll()}
+  else if(t.dataset.bind){renderCtl()}});
+ctl.addEventListener('pointerdown',function(e){if(e.target.type==='range')ctlBusy=true});
+document.addEventListener('pointerup',function(){if(ctlBusy){ctlBusy=false;if(ctlPending){ctlPending=false;renderCtl()}}});
+
+/* ───── clocks ───── */
+setInterval(function(){if(!S.ctl.live||document.hidden)return;
+  S.cpu=clamp(S.cpu+(Math.random()-.5)*10,1,100);S.hist.cpu.push(S.cpu);S.hist.cpu.shift();
+  S.mem=clamp(S.mem+(Math.random()-.5)*1.2,1,100);S.hist.mem.push(S.mem);S.hist.mem.shift();
+  S.down=clamp(S.down+(Math.random()-.5)*1.4,.1,9);
+  renderLive()},3000);
+setInterval(function(){if(S.bar.ticker&&!S.pinned&&!document.hidden){S.tick++;renderLive()}},5000);
+setInterval(function(){S.sessions.forEach(function(s){if(s.state!=='launching')s.age+=1});},60000);
+
+/* ───── scale artboard ───── */
+function fit(){var w=stage.clientWidth,s=w/1200;desk.style.transform='scale('+s+')';stage.style.height=Math.round(740*s)+'px'}
+if(window.ResizeObserver)new ResizeObserver(fit).observe(stage);window.addEventListener('resize',fit);
+fit();renderAll();
+})();
+</script>
