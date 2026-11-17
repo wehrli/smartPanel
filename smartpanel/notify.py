@@ -1,26 +1,68 @@
 """Desktop notifications, with a fallback and a hard no-crash guarantee.
 
-The alert policy lives in `alerts.py`; this module only knows how to put a
-bubble on screen. Two routes, tried in order:
+Public API (what collectors and services call)::
+
+    from smartpanel import notify
+    notify.send("journal_ok", "Journal written · Fix login bug",
+                "Appended to JOURNAL/2026-11.md. Session closed.",
+                action=notify.Action("View", lambda: store.emit(
+                    Event("open_dashboard", {"page": "journal:<id>"}))))
+
+`send(kind, title, body="", *, action=None, key=None) -> bool`
+
+* `kind` is one of `KINDS` (SP-2501). The kind decides the urgency, the icon,
+  the *replacement key* (a new bubble of the same key replaces the old one on
+  screen instead of stacking) and whether it may break through Do Not Disturb:
+
+  ============== ======== ========= ===================================
+  kind           urgency  key       notes
+  ============== ======== ========= ===================================
+  swap_warning   normal   swap      warning → critical → ok replace each other
+  swap_critical  critical swap      the ONLY kind sent while DND is on
+  swap_ok        low      swap
+  journal_ok     low      journal   pass `key=` per session for Close all
+  journal_failed normal   journal
+  budget_80      normal   budget    100 % replaces the 80 % bubble
+  budget_100     normal   budget
+  ============== ======== ========= ===================================
+
+* `action` is an optional `Action(label, callback)`: a button on the bubble
+  (and the bubble's default click). The callback runs on the GLib main loop
+  with no arguments. Only libnotify on a server advertising the `actions`
+  capability shows it; the `notify-send` and log fallbacks drop it silently.
+* `key` overrides the kind's replacement key (e.g. `"journal:claude-ledgerly"`
+  so two sessions closing at once get two bubbles).
+* Returns True when the bubble was handed to a backend; False when it was
+  logged instead (no backend, DND, or a failure). **It never raises.**
+
+Do Not Disturb (SP-2503): when `org.gnome.desktop.notifications show-banners`
+is false, everything but `swap_critical` goes to the log. The setting is read
+through `Gio.Settings`, guarded so a missing schema (non-GNOME desktop) means
+"banners on" rather than a crash.
+
+Backends, tried in order:
 
 1. **libnotify via gi** (`gir1.2-notify-0.7`). In-process and sub-millisecond,
-   which is what the main-loop rule demands. It also lets us *reuse* one
-   notification handle per alert key, so a repeating swap alert replaces its
-   own bubble instead of stacking a new one every ten minutes.
-2. **`notify-send`**, spawned and deliberately never waited on. A shellout on
-   the GLib loop would block; `Popen` without `wait()` does not. The child is
-   reaped opportunistically on the next send.
+   which is what the main-loop rule demands. One notification handle is reused
+   per key, so a repeating swap alert replaces its own bubble.
+2. **`notify-send`**, spawned and deliberately never waited on (a shellout on
+   the GLib loop would block; `Popen` without `wait()` does not). Children are
+   reaped on the next send.
+3. A WARNING log line.
 
-If neither is available (no notification daemon, headless, a session over SSH)
-the message is logged at WARNING and the panel carries on. An alert failing to
-display must never be the reason the panel dies, so every entry point here is
-wrapped — `send()` cannot raise.
+Tests build their own `Notifier(backend=..., banners_enabled=...)`; nothing in
+the test suite ever reaches a real notification daemon.
+
+Legacy form: `send(summary, body, urgency, key=...)` (the v1 indicator) still
+works — a first argument that isn't a known kind is treated as a summary.
 """
 from __future__ import annotations
 
 import logging
 import shutil
 import subprocess
+from dataclasses import dataclass
+from typing import Callable
 
 log = logging.getLogger(__name__)
 
@@ -34,14 +76,41 @@ _ICON_BY_URGENCY = {
     "critical": "dialog-error",
 }
 
-_backend: "_Backend | None" = None
-_pending: list[subprocess.Popen] = []
 
+@dataclass(frozen=True)
+class Kind:
+    urgency: str
+    key: str
+    icon: str
+    bypass_dnd: bool = False
+
+
+KINDS: dict[str, Kind] = {
+    "swap_warning": Kind("normal", "swap", "dialog-warning"),
+    "swap_critical": Kind("critical", "swap", "dialog-error", bypass_dnd=True),
+    "swap_ok": Kind("low", "swap", "dialog-information"),
+    "journal_ok": Kind("low", "journal", "document-save"),
+    "journal_failed": Kind("normal", "journal", "dialog-error"),
+    "budget_80": Kind("normal", "budget", "dialog-warning"),
+    "budget_100": Kind("normal", "budget", "dialog-warning"),
+}
+
+
+@dataclass(frozen=True)
+class Action:
+    """A button on the bubble. `callback()` runs on the GLib main loop."""
+
+    label: str
+    callback: Callable[[], None]
+
+
+# ───────────────────────── backends ─────────────────────────
 
 class _Backend:
     """Marker base — subclasses implement `show`."""
 
-    def show(self, summary: str, body: str, urgency: str, key: str) -> bool:
+    def show(self, summary: str, body: str, urgency: str, key: str,
+             icon: str | None = None, action: Action | None = None) -> bool:
         raise NotImplementedError
 
 
@@ -49,14 +118,24 @@ class _LibNotify(_Backend):
     def __init__(self, notify_mod):
         self._Notify = notify_mod
         self._handles: dict[str, object] = {}
+        self._actions_ok: bool | None = None
 
-    def show(self, summary: str, body: str, urgency: str, key: str) -> bool:
+    def _supports_actions(self) -> bool:
+        if self._actions_ok is None:
+            try:
+                self._actions_ok = "actions" in (self._Notify.get_server_caps() or [])
+            except Exception:  # noqa: BLE001
+                self._actions_ok = False
+        return self._actions_ok
+
+    def show(self, summary: str, body: str, urgency: str, key: str,
+             icon: str | None = None, action: Action | None = None) -> bool:
         urgencies = {
             "low": self._Notify.Urgency.LOW,
             "normal": self._Notify.Urgency.NORMAL,
             "critical": self._Notify.Urgency.CRITICAL,
         }
-        icon = _ICON_BY_URGENCY.get(urgency, DEFAULT_ICON)
+        icon = icon or _ICON_BY_URGENCY.get(urgency, DEFAULT_ICON)
         note = self._handles.get(key)
         if note is None:
             note = self._Notify.Notification.new(summary, body, icon)
@@ -64,71 +143,171 @@ class _LibNotify(_Backend):
         else:
             # Same key => same on-screen bubble, updated in place.
             note.update(summary, body, icon)
+            note.clear_actions()
         note.set_urgency(urgencies.get(urgency, self._Notify.Urgency.NORMAL))
+        if action is not None and self._supports_actions():
+            cb = _guarded(action)
+            note.add_action("default", action.label, cb, None)
+            note.add_action("open", action.label, cb, None)
         note.show()
         return True
 
 
+def _guarded(action: Action):
+    def cb(_note, _action_id, _user_data=None):
+        try:
+            action.callback()
+        except Exception:  # noqa: BLE001 — a click must not kill the loop
+            log.exception("notification action %r failed", action.label)
+    return cb
+
+
 class _NotifySend(_Backend):
-    def show(self, summary: str, body: str, urgency: str, key: str) -> bool:
-        _reap()
+    def __init__(self):
+        self._pending: list[subprocess.Popen] = []
+
+    def show(self, summary: str, body: str, urgency: str, key: str,
+             icon: str | None = None, action: Action | None = None) -> bool:
+        self._reap()
         cmd = [
             "notify-send",
             "--app-name", APP_NAME,
             "--urgency", urgency if urgency in _ICON_BY_URGENCY else "normal",
-            "--icon", _ICON_BY_URGENCY.get(urgency, DEFAULT_ICON),
+            "--icon", icon or _ICON_BY_URGENCY.get(urgency, DEFAULT_ICON),
             summary,
             body,
         ]
-        # Never wait: this runs on the GLib main loop.
-        _pending.append(subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.DEVNULL))
+        # Never wait: this runs on the GLib main loop. Actions would need a
+        # blocking `--wait`, so this route drops them.
+        self._pending.append(subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                              stderr=subprocess.DEVNULL))
         return True
 
+    def _reap(self) -> None:
+        """Collect finished `notify-send` children so they don't linger as zombies."""
+        for proc in list(self._pending):
+            if proc.poll() is not None:
+                self._pending.remove(proc)
 
-def _reap() -> None:
-    """Collect finished `notify-send` children so they don't linger as zombies."""
-    for proc in list(_pending):
-        if proc.poll() is not None:
-            _pending.remove(proc)
 
-
-def _get_backend() -> _Backend | None:
-    global _backend
-    if _backend is not None:
-        return _backend
+def _default_backend() -> _Backend | None:
     try:
         import gi
         gi.require_version("Notify", "0.7")
         from gi.repository import Notify
         if Notify.init(APP_NAME):
-            _backend = _LibNotify(Notify)
             log.debug("notifications via libnotify")
-            return _backend
+            return _LibNotify(Notify)
         log.debug("Notify.init() refused — falling back to notify-send")
     except (ImportError, ValueError, AttributeError) as e:
         log.debug("libnotify unavailable (%s) — falling back to notify-send", e)
 
     if shutil.which("notify-send"):
-        _backend = _NotifySend()
         log.debug("notifications via notify-send")
-        return _backend
+        return _NotifySend()
     return None
 
 
-def send(summary: str, body: str = "", urgency: str = "normal",
-         key: str = "smartpanel") -> bool:
-    """Show a notification. Returns True if it was handed to a backend.
+# ───────────────────────── Do Not Disturb ─────────────────────────
 
-    `key` groups repeats of the same alert onto one bubble (libnotify route).
-    Failure is never fatal — it degrades to a log line.
-    """
-    try:
-        backend = _get_backend()
+DND_SCHEMA = "org.gnome.desktop.notifications"
+DND_KEY = "show-banners"
+
+
+class _GnomeBanners:
+    """`show-banners` via Gio.Settings. Missing gi/schema/key => banners on."""
+
+    def __init__(self):
+        self._settings = None
+        self._tried = False
+
+    def __call__(self) -> bool:
+        if not self._tried:
+            self._tried = True
+            try:
+                from gi.repository import Gio
+                source = Gio.SettingsSchemaSource.get_default()
+                schema = source.lookup(DND_SCHEMA, True) if source else None
+                if schema is not None and schema.has_key(DND_KEY):
+                    self._settings = Gio.Settings.new(DND_SCHEMA)
+            except Exception as e:  # noqa: BLE001
+                log.debug("DND setting unavailable: %s", e)
+        if self._settings is None:
+            return True
+        try:
+            return bool(self._settings.get_boolean(DND_KEY))
+        except Exception:  # noqa: BLE001
+            return True
+
+
+# ───────────────────────── notifier ─────────────────────────
+
+_UNSET = object()
+
+
+class Notifier:
+    """Kind → bubble policy around a backend. Injectable for tests."""
+
+    def __init__(self, backend=_UNSET, banners_enabled: Callable[[], bool] | None = None):
+        self._backend = backend
+        self._banners_enabled = banners_enabled or _GnomeBanners()
+
+    def _get_backend(self) -> _Backend | None:
+        if self._backend is _UNSET:
+            self._backend = _default_backend()
+        return self._backend  # type: ignore[return-value]
+
+    def _dnd(self) -> bool:
+        try:
+            return not self._banners_enabled()
+        except Exception:  # noqa: BLE001
+            return False
+
+    def send(self, kind: str, title: str = "", body: str = "", *,
+             action: Action | None = None, key: str | None = None,
+             urgency: str | None = None) -> bool:
+        try:
+            spec = KINDS.get(kind)
+            if spec is None:
+                # Legacy positional form: send(summary, body, urgency, key=...).
+                summary, body, legacy_urgency = kind, title, (body or "normal")
+                return self._show(summary, body, urgency or legacy_urgency,
+                                  key or "smartpanel", None, action,
+                                  bypass_dnd=(urgency or legacy_urgency) == "critical")
+            return self._show(title, body, urgency or spec.urgency, key or spec.key,
+                              spec.icon, action, bypass_dnd=spec.bypass_dnd)
+        except Exception as e:  # noqa: BLE001 — an alert must not kill the loop
+            log.warning("notification failed (%s): %s — %s", e, title, body)
+            return False
+
+    def _show(self, summary, body, urgency, key, icon, action, *, bypass_dnd) -> bool:
+        if not bypass_dnd and self._dnd():
+            log.info("notification held by Do Not Disturb: %s — %s", summary, body)
+            return False
+        backend = self._get_backend()
         if backend is None:
             log.warning("notification (no backend): %s — %s", summary, body)
             return False
-        return backend.show(summary, body, urgency, key)
-    except Exception as e:  # noqa: BLE001 — an alert must not kill the loop
-        log.warning("notification failed (%s): %s — %s", e, summary, body)
+        return backend.show(summary, body, urgency, key, icon=icon, action=action)
+
+
+_default: Notifier | None = None
+
+
+def default_notifier() -> Notifier:
+    global _default
+    if _default is None:
+        _default = Notifier()
+    return _default
+
+
+def send(kind: str, title: str = "", body: str = "", *,
+         action: Action | None = None, key: str | None = None,
+         urgency: str | None = None) -> bool:
+    """Show a notification of `kind` (see the module docstring). Never raises."""
+    try:
+        return default_notifier().send(kind, title, body, action=action, key=key,
+                                       urgency=urgency)
+    except Exception as e:  # noqa: BLE001
+        log.warning("notification failed (%s): %s — %s", e, title, body)
         return False
