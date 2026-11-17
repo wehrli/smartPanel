@@ -430,4 +430,11 @@ def test_notify_falls_back_to_the_original_send_signature(monkeypatch, h):
     monkeypatch.setattr(notify, "send", lambda kind, title, body, action=None:
                         new.append((kind, title, body, action)))
     h.ctl._notify("journal", "Journal written · x", "b", {"label": "View", "page": "journal:1"})
-    assert new == [("journal", "Journal written · x", "b", {"label": "View", "page": "journal:1"})]
+    # The v2 notifier knows the success kind as "journal_ok" and wants a notify.Action.
+    assert [(k, t, b) for k, t, b, _ in new] == [("journal_ok", "Journal written · x", "b")]
+    button = new[0][3]
+    assert isinstance(button, notify.Action) and button.label == "View"
+    events = []
+    h.store.on_event(events.append)
+    button.callback()
+    assert events[-1].kind == "open_dashboard" and events[-1].data == {"page": "journal:1"}

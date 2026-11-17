@@ -107,6 +107,7 @@ system:
     - 80.8
     - 86.0
     - 88.0
+    alerted: false
   disk:
     mount: /
     percent: 41.0
@@ -645,6 +646,7 @@ sessions:
   tmux_ok: true
   terminal_ok: true
   updated_at: 1794925920.0
+  close_all: null
 journal:
   entries:
   - id: 2026-11-17-1202-tacomap
@@ -737,6 +739,7 @@ settings:
     disk.mount: /
     hud.enabled: false
     hud.corner: top-right
+    hud.margin: 30
     appearance.style: system
     palette.shortcut: <Ctrl><Alt>space
   overridden_by: {}

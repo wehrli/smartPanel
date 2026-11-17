@@ -53,7 +53,7 @@ DEFAULTS: dict[str, Any] = {
     "sessions.journal": True, "sessions.min_age_s": 120, "sessions.confirm_seconds": 5,
     "sessions.reattach": True, "sessions.dir": "~/dev/omdev", "sessions.terminal": "terminator",
     "disk.mount": "/",
-    "hud.enabled": False, "hud.corner": "top-right",
+    "hud.enabled": False, "hud.corner": "top-right", "hud.margin": 30,
     "appearance.style": "system",
     "palette.shortcut": "<Ctrl><Alt>space",
 }
@@ -207,6 +207,8 @@ SPECS: dict[str, Spec] = {
     "hud.enabled": Spec("bool", "Desktop", "Desktop HUD",
                         "Spend and sessions drawn on the wallpaper"),
     "hud.corner": Spec("choice", "Desktop", "HUD corner", choices=HUD_CORNERS),
+    "hud.margin": Spec("int", "Desktop", "HUD margin", "Distance from the screen edge",
+                       min=0, max=400, unit="px"),
     "appearance.style": Spec("choice", "Appearance", "Window style",
                              "Follows GNOME’s dark style by default", choices=STYLES),
     "palette.shortcut": Spec("str", "Desktop", "Command palette shortcut",

@@ -356,7 +356,16 @@ class Controller:
                 return
             params = list(inspect.signature(send).parameters)
             if params and params[0] == "kind":
-                send(kind, title, body, action=action)
+                # notify.KINDS names the success kind "journal_ok"; the bubble's
+                # button must be a notify.Action whose callback routes the page.
+                v2_kind = "journal_ok" if kind == "journal" else kind
+                button = None
+                if action and hasattr(notify, "Action"):
+                    page = action.get("page", "journal")
+                    button = notify.Action(action.get("label", "View"),
+                                           lambda p=page: self.store.emit(
+                                               Event("open_dashboard", {"page": p})))
+                send(v2_kind, title, body, action=button)
             else:  # the original send(summary, body, urgency, key)
                 send(title, body, urgency="critical" if kind.endswith("failed") else "normal",
                      key=f"smartpanel-{kind}")
