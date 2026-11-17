@@ -12,6 +12,11 @@ from smartpanel.notify import KINDS, Action, Notifier
 class Recorder(notify._Backend):
     def __init__(self):
         self.shown = []
+        self.closed = []
+
+    def close(self, key):
+        self.closed.append(key)
+        return True
 
     def show(self, summary, body, urgency, key, icon=None, action=None):
         self.shown.append(dict(summary=summary, body=body, urgency=urgency, key=key,
@@ -175,3 +180,100 @@ def test_action_callback_errors_are_contained():
     def bad():
         raise ValueError("x")
     notify._guarded(Action("View", bad))(None, "open", None)   # must not raise
+
+
+# ── closing a bubble that outlived its alert ──
+
+def test_dnd_held_update_closes_the_bubble_it_would_replace():
+    banners = {"on": False}
+    rec = Recorder()
+    n = Notifier(backend=rec, banners_enabled=lambda: banners["on"])
+    assert n.send("swap_critical", "Swap critically full", "93% used") is True
+    assert n.send("swap_ok", "Swap back to normal", "15% used.") is False
+    assert [s["summary"] for s in rec.shown] == ["Swap critically full"]
+    assert rec.closed == ["swap"]
+
+
+def test_close_before_anything_was_shown_is_a_noop():
+    n = Notifier(banners_enabled=lambda: True)   # backend never resolved
+    assert n.close("swap") is False
+
+
+def test_close_never_raises():
+    class Bad(Recorder):
+        def close(self, key):
+            raise RuntimeError("dbus gone")
+    n = Notifier(backend=Bad(), banners_enabled=lambda: True)
+    assert n.close("swap") is False
+
+
+class ClosableNote:
+    def __init__(self, *a):
+        self.closed = 0
+
+    def update(self, *a):
+        pass
+
+    def clear_actions(self):
+        pass
+
+    def set_urgency(self, u):
+        pass
+
+    def add_action(self, *a):
+        pass
+
+    def show(self):
+        pass
+
+    def close(self):
+        self.closed += 1
+
+
+class ClosableNotifyMod:
+    class Urgency:
+        LOW, NORMAL, CRITICAL = 0, 1, 2
+
+    class Notification:
+        made = []
+
+        @classmethod
+        def new(cls, *a):
+            note = ClosableNote(*a)
+            cls.made.append(note)
+            return note
+
+    @staticmethod
+    def get_server_caps():
+        return []
+
+
+def test_libnotify_close_drops_the_handle():
+    ClosableNotifyMod.Notification.made = []
+    be = notify._LibNotify(ClosableNotifyMod)
+    be.show("Swap critically full", "93%", "critical", "swap")
+    assert be.close("swap") is True
+    assert ClosableNotifyMod.Notification.made[0].closed == 1
+    assert be.close("swap") is False
+    be.show("Swap is filling up", "66%", "normal", "swap")   # a fresh bubble
+    assert len(ClosableNotifyMod.Notification.made) == 2
+
+
+# ── a mistyped kind is loud ──
+
+def test_mistyped_kind_logs_a_warning_once(caplog):
+    n, rec = make()
+    with caplog.at_level("WARNING", logger="smartpanel.notify"):
+        n.send("journal_succeeded", "Journal written", "body")
+        n.send("journal_succeeded", "Journal written", "body")
+    warnings = [r for r in caplog.records if "not a known kind" in r.message]
+    assert len(warnings) == 1 and "journal_succeeded" in warnings[0].message
+    assert len(rec.shown) == 2          # still never raises, still shows
+
+
+def test_legacy_summary_does_not_warn(caplog):
+    n, rec = make()
+    with caplog.at_level("WARNING", logger="smartpanel.notify"):
+        n.send("Swap nearly full", "62% used", "critical", key="swap")
+    assert not [r for r in caplog.records if "not a known kind" in r.message]
+    assert rec.shown[0]["urgency"] == "critical"

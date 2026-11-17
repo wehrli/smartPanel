@@ -10,13 +10,20 @@ category is primed synchronously in `start()` so surfaces open on real numbers.
 
 Each tick is a psutil call plus a few small sysfs reads: well under the 50 ms
 main-loop budget (measured ~1-5 ms). A tick slower than that is logged once per
-category at WARNING so a regression is visible.
+category at WARNING so a regression is visible. The exception is DISK: `statvfs`
+on `disk.mount` can block indefinitely when that is a hung NFS/SSHFS mount, so
+once started, DISK reads run on a daemon thread and come back via
+`GLib.idle_add` (only the main thread touches the Store). While a read is still
+in flight the next one is skipped, so a hung mount costs one stuck thread, never
+the panel.
 
-**History.** Each series keeps a `history.RingBuffer` of 300 points, but the state
-exports only the last 15 minutes (`HISTORY_WINDOW_S`) of each, rounded to 0.1:
-CPU/NET at 3 s → 300 points, MEMORY/GPU at 5 s → 180, SWAP at 10 s → 90. That is
-what "15 min history" in the UI means, and keeps the D-Bus JSON of the whole
-`system` section around 8 KB. Values that are None (no swap, no GPU, no rate yet)
+**History.** Each series keeps a `history.RingBuffer` sized from its poll
+interval to hold 15 minutes (`HISTORY_WINDOW_S`), never fewer than 300 points,
+and the state exports exactly the last 15 minutes of it, rounded to 0.1: CPU/NET
+at 3 s → 300 points, MEMORY/GPU at 5 s → 180, SWAP at 10 s → 90, and a theme
+that polls NET at 2 s gets 450. That is what "15 min history" in the UI means;
+at the defaults the D-Bus JSON of the whole `system` section is around 8 KB
+(polling is floored at 1 s, so the worst case is 900 points per series). Values that are None (no swap, no GPU, no rate yet)
 are not pushed, so an empty list is the honest "no data" state.
 
 **Swap alert.** The collector owns the one `alerts.AlertTracker`, built from the
@@ -26,7 +33,9 @@ are not pushed, so an empty list is the honest "no data" state.
 asked for. Policy is entirely the tracker's: notify going up, stay quiet on
 CRITICAL→WARNING, one recovery if we alerted, critical repeats every `repeat_s`.
 A `swap.*` change reconfigures the tracker live (`AlertTracker.reconfigure`):
-the level is kept, nothing re-fires, and a drop it causes is silent.
+the level is kept, nothing re-fires, and a drop it causes is silent — except
+that a drop to OK withdraws the bubble still on screen (`notify.close("swap")`),
+since GNOME never expires a critical one.
 
 The clock and the notifier are injectable so the swap journey can be tested
 without GLib, a display, or sleeping (see tests/test_collect_system.py).
@@ -36,6 +45,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import threading
 import time
 from typing import Any, Callable
 
@@ -85,8 +95,19 @@ def intervals_for(theme=None) -> dict[str, float]:
 
 
 def export_points(interval: float) -> int:
-    """How many samples cover HISTORY_WINDOW_S at this interval (≤ ring size)."""
-    return max(1, min(DEFAULT_SIZE, math.ceil(HISTORY_WINDOW_S / max(interval, 1))))
+    """How many samples cover HISTORY_WINDOW_S at this interval (polls floor at 1 s)."""
+    return max(1, math.ceil(HISTORY_WINDOW_S / max(interval, 1)))
+
+
+def ring_size(interval: float) -> int:
+    """Ring capacity for a series polled every `interval` s: ≥ 15 min, ≥ 300."""
+    return max(DEFAULT_SIZE, export_points(interval))
+
+
+_SERIES_CATEGORY = {"cpu": "CPU", "memory": "MEMORY", "swap": "SWAP",
+                    "net_down": "NET", "net_up": "NET", "gpu": "GPU"}
+# Categories whose sensor may block (statvfs on a network mount): read off-loop.
+OFF_LOOP = frozenset({"DISK"})
 
 
 def _r(v: Any, nd: int = 1) -> float | None:
@@ -126,22 +147,27 @@ class SystemCollector:
     def __init__(self, store, config, theme=None, *,
                  readers: dict[str, Reader] | None = None,
                  notifier: Callable[..., Any] | None = None,
+                 closer: Callable[[str], Any] | None = None,
                  clock: Callable[[], float] = time.monotonic):
         self.store, self.config, self.theme = store, config, theme
         self.intervals = intervals_for(theme)
+        self._default_disk: Reader = lambda: sys_sensor.disk(self._mount())
         self.readers: dict[str, Reader] = {
             "CPU": sys_sensor.cpu,
             "MEMORY": sys_sensor.memory,
             "SWAP": sys_sensor.swap,
-            "DISK": lambda: sys_sensor.disk(self._mount()),
+            "DISK": self._default_disk,
             "NET": sys_sensor.network,
             "GPU": gpu_sensor.gpu,
         }
         self.readers.update(readers or {})
         self._notify = notifier or notify.send
+        self._close = closer or notify.close
         self._clock = clock
-        self._hist = {name: RingBuffer(DEFAULT_SIZE) for name in
-                      ("cpu", "memory", "swap", "net_down", "net_up", "gpu")}
+        self._hist = {name: RingBuffer(ring_size(self.intervals[cat]))
+                      for name, cat in _SERIES_CATEGORY.items()}
+        self._in_flight: set[str] = set()
+        self._stuck_logged: set[str] = set()
         self.tracker = alerts.AlertTracker(self._thresholds())
         self._swap_reading: tuple[float | None, float | None, float | None] = (None, None, None)
         self._timers: list[int] = []
@@ -160,7 +186,8 @@ class SystemCollector:
         except Exception:  # noqa: BLE001 — a config without observers still polls
             log.exception("config.subscribe failed")
         for cat in CATEGORIES:
-            self.tick(cat)   # prime: surfaces open on real values
+            # prime: surfaces open on real values (DISK arrives a moment later)
+            self._run(cat)
             iv = int(max(1, round(self.intervals[cat])))
             self._timers.append(GLib.timeout_add_seconds(iv, self._on_timer, cat))
             log.debug("system: %s every %ds", cat, iv)
@@ -176,8 +203,70 @@ class SystemCollector:
             self._unsubscribe = None
 
     def _on_timer(self, cat: str) -> bool:
-        self.tick(cat)
+        self._run(cat)
         return True  # GLib.SOURCE_CONTINUE
+
+    def _run(self, cat: str) -> None:
+        """Tick from the loop: inline, or on a thread for OFF_LOOP categories."""
+        if cat in OFF_LOOP:
+            self.tick_async(cat)
+        else:
+            self.tick(cat)
+
+    # ── off-loop tick (DISK) ──
+    def _reader_snapshot(self, cat: str) -> Reader:
+        """The reader with any settings resolved now, on the main thread."""
+        reader = self.readers[cat]
+        if cat == "DISK" and reader is self._default_disk:
+            mount = self._mount()
+            return lambda: sys_sensor.disk(mount)
+        return reader
+
+    def tick_async(self, cat: str, *, spawn: Callable[[Callable[[], None]], Any] | None = None,
+                   post: Callable[..., Any] | None = None) -> bool:
+        """Read `cat` on a daemon thread, apply it on the main loop.
+
+        Returns False (and reads nothing) while the previous read is still
+        running: a hung network mount must not pile up threads. `spawn`/`post`
+        are injectable for tests; they default to a daemon thread and
+        `GLib.idle_add`.
+        """
+        if cat in self._in_flight:
+            if cat not in self._stuck_logged:
+                self._stuck_logged.add(cat)
+                log.warning("system: %s read still pending; skipping until it returns", cat)
+            return False
+        if post is None:
+            from gi.repository import GLib
+            post = GLib.idle_add
+        reader = self._reader_snapshot(cat)
+        self._in_flight.add(cat)
+
+        def work() -> None:
+            try:
+                values = reader() or {}
+            except Exception:  # noqa: BLE001
+                log.exception("sensor %s failed", cat)
+                values = {}
+            post(self._finish_async, cat, values)
+
+        if spawn is None:
+            threading.Thread(target=work, name=f"smartpanel-{cat.lower()}",
+                             daemon=True).start()
+        else:
+            spawn(work)
+        return True
+
+    def _finish_async(self, cat: str, values: dict[str, Any]) -> bool:
+        self._in_flight.discard(cat)
+        self._stuck_logged.discard(cat)
+        try:
+            self.apply(cat, values)
+            if cat == "DISK" and values.get("MOUNT") not in (None, self._mount()):
+                self.tick_async(cat)   # the mount changed while we were reading
+        except Exception:  # noqa: BLE001
+            log.exception("applying %s failed", cat)
+        return False  # GLib.SOURCE_REMOVE: one-shot idle
 
     # ── one tick ──
     def tick(self, cat: str) -> bool:
@@ -330,15 +419,29 @@ class SystemCollector:
                                       get("swap.hysteresis"), get("swap.repeat_s"))
 
     def reconfigure_swap(self) -> None:
-        """Apply the current `swap.*` settings live (SP-0103). Never notifies."""
-        self.tracker.reconfigure(self._thresholds())
+        """Apply the current `swap.*` settings live (SP-0103). Never notifies.
+
+        A drop all the way to OK closes the bubble still on screen instead: a
+        critical one never expires by itself, and no recovery bubble will come
+        to replace it.
+        """
+        before = self.tracker.level
+        after = self.tracker.reconfigure(self._thresholds())
         self._publish_swap()
+        if before is not alerts.Level.OK and after is alerts.Level.OK:
+            try:
+                self._close("swap")
+            except Exception:  # noqa: BLE001
+                log.exception("closing the swap notification failed")
 
     def _on_config(self, key: str, _value: Any = None) -> None:
         try:
             if key is None or key.startswith("swap."):
                 self.reconfigure_swap()
             if key is None or key == "disk.mount":
-                self.tick("DISK")
+                if self._timers:
+                    self.tick_async("DISK")
+                else:
+                    self.tick("DISK")
         except Exception:  # noqa: BLE001
             log.exception("system: config change %r failed", key)

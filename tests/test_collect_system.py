@@ -50,9 +50,19 @@ def cfg(tmp_path):
     return Config.load(tmp_path / "config.yaml")
 
 
-def make(cfg, theme=None, **readers):
+class Closer:
+    def __init__(self):
+        self.keys = []
+
+    def __call__(self, key):
+        self.keys.append(key)
+        return True
+
+
+def make(cfg, theme=None, closer=None, **readers):
     store, rec, clock = Store(), Recorder(), Clock()
-    col = SystemCollector(store, cfg, theme, readers=readers, notifier=rec, clock=clock)
+    col = SystemCollector(store, cfg, theme, readers=readers, notifier=rec,
+                          closer=closer or Closer(), clock=clock)
     return col, store, rec, clock
 
 
@@ -76,26 +86,40 @@ def prototype_path(start, target):
     return out
 
 
+# Hand-written oracle for the default thresholds (warn 60, crit 85, hysteresis 5):
+# OK below 60, WARNING from 60, CRITICAL from 85; on the way down CRITICAL holds
+# until below 80 and WARNING until below 55. Deliberately not alerts.next_level.
+O, W, C = LEVEL_OK, LEVEL_WARNING, LEVEL_CRITICAL
+JOURNEY = [
+    (26, O), (37, O), (46, O), (54, O), (60, W), (66, W), (70, W), (74, W),
+    (77, W), (80, W), (82, W), (84, W), (86, C), (88, C), (90, C), (92, C),
+    (93, C),
+    (80, C), (69, W), (60, W), (52, O), (46, O), (41, O), (37, O), (33, O),
+    (30, O), (28, O), (26, O), (24, O), (22, O), (20, O), (18, O), (16, O),
+    (15, O),
+]
+
+
+def test_journey_table_is_the_prototype_path():
+    assert [p for p, _ in JOURNEY] == prototype_path(12, 93) + prototype_path(93, 15)
+
+
 def test_swap_journey_12_93_15(cfg):
+    # SP-0112, collector half. The bar-text half (SP-0104's "12" / "⚠66" / "⚠88"
+    # A1 segment) belongs to WP-tray's barspec and is asserted at integration.
     col, store, rec, clock = make(cfg)
     col.apply_swap(swap_reading(12))
     assert rec.calls == []
-    assert alerts.swap_status(alerts.Level(store.state.system.swap.level), 12) == "🔃12%"
+    assert store.state.system.swap.level == LEVEL_OK
 
     seen = []
-    for p in prototype_path(12, 93) + prototype_path(93, 15):
+    for p, expected in JOURNEY:
         clock.t += 3
         col.apply_swap(swap_reading(p))
         s = store.state.system.swap
         seen.append((p, s.level))
-        expected = alerts.next_level(p, alerts.Level(seen[-2][1]) if len(seen) > 1
-                                     else alerts.Level.OK, col.tracker.thresholds)
-        assert s.level == int(expected)
+        assert s.level == expected, (p, s.level, expected)
         assert s.percent == p
-        # The bar text the panel derives from this state, at every step.
-        status = alerts.swap_status(alerts.Level(s.level), s.percent)
-        glyph = {LEVEL_OK: "", LEVEL_WARNING: "⚠", LEVEL_CRITICAL: "🔴"}[s.level]
-        assert status == f"{glyph}🔃{p}%"
 
     assert rec.kinds == ["swap_warning", "swap_critical", "swap_ok"]
     warn, crit, ok = rec.calls
@@ -171,6 +195,23 @@ def test_raising_warn_drops_level_quietly(cfg):
     assert rec.kinds == ["swap_warning"]      # no re-fire, no "back to normal"
 
 
+def test_quiet_drop_to_ok_closes_the_bubble(cfg):
+    # A critical bubble never expires in GNOME; no recovery will replace it.
+    closer = Closer()
+    col, store, rec, _ = make(cfg, closer=closer)
+    col.apply_swap(swap_reading(88))
+    assert rec.kinds == ["swap_critical"]
+    cfg.set("swap.crit", 97)           # 88 -> WARNING: quiet, bubble stays
+    col.reconfigure_swap()
+    assert store.state.system.swap.level == LEVEL_WARNING and closer.keys == []
+    cfg.set("swap.warn", 95)           # 88 -> OK: quiet, bubble withdrawn
+    col.reconfigure_swap()
+    assert store.state.system.swap.level == LEVEL_OK
+    assert closer.keys == ["swap"] and rec.kinds == ["swap_critical"]
+    col.reconfigure_swap()             # already OK: nothing more to close
+    assert closer.keys == ["swap"]
+
+
 def test_crit_below_warn_is_clamped(cfg):
     cfg.set("swap.warn", 70)
     cfg.set("swap.crit", 50)
@@ -212,6 +253,21 @@ def test_history_export_is_15_minutes(cfg):
     assert export_points(5) == 180 and export_points(60) == 15
 
 
+def test_history_covers_15_minutes_at_a_themed_2s_interval(cfg):
+    # The shipped default.yaml polls NET at 2 s: 300 points would be 10 min.
+    theme = Theme(metrics=[MetricRender("NET", "DOWNLOAD", interval=2),
+                           MetricRender("CPU", "PERCENTAGE", interval=1)])
+    col, store, _, _ = make(cfg, theme)
+    for i in range(1200):
+        col.apply_net({"DOWNLOAD_BPS": float(i), "UPLOAD_BPS": 1.0, "IFACE": "all"})
+        col.apply_cpu({"PERCENTAGE": 5.0, "CORES": 4})
+    n = store.state.system.net
+    assert len(n.history_down) * col.intervals["NET"] == 900
+    assert n.history_down[-1] == 1199.0
+    assert len(store.state.system.cpu.history) == 900        # 1 s × 900
+    assert collect.ring_size(3) == 300 and collect.ring_size(2) == 450
+
+
 def test_memory_state(cfg):
     col, store, _, _ = make(cfg)
     col.apply_memory({"PERCENTAGE": 68.0, "USED": 10.8, "TOTAL": 15.6})
@@ -225,6 +281,66 @@ def test_disk_uses_configured_mount(cfg, tmp_path):
     col.tick("DISK")
     d = store.state.system.disk
     assert d.mount == str(tmp_path) and d.total_gb and d.percent is not None
+
+
+class Deferred:
+    """Stand-ins for a thread and GLib.idle_add: run only when told to."""
+
+    def __init__(self):
+        self.work, self.posted = [], []
+
+    def spawn(self, fn):
+        self.work.append(fn)
+
+    def post(self, fn, *args):
+        self.posted.append((fn, args))
+
+    def run_all(self):
+        while self.work:
+            self.work.pop(0)()
+        while self.posted:
+            fn, args = self.posted.pop(0)
+            fn(*args)
+
+
+def test_disk_reads_off_loop_and_never_piles_up(cfg, tmp_path):
+    cfg.set("disk.mount", str(tmp_path))
+    col, store, _, _ = make(cfg)
+    d = Deferred()
+    assert col.tick_async("DISK", spawn=d.spawn, post=d.post) is True
+    # A hung mount: the read hasn't returned, so the next tick does nothing.
+    assert col.tick_async("DISK", spawn=d.spawn, post=d.post) is False
+    assert len(d.work) == 1 and store.state.system.disk.percent is None
+    d.work.pop(0)()                     # the "thread" finishes...
+    assert store.state.system.disk.percent is None   # ...but only posts
+    fn, args = d.posted.pop(0)
+    assert fn(*args) is False           # main loop applies; one-shot idle
+    assert store.state.system.disk.mount == str(tmp_path)
+    assert store.state.system.disk.percent is not None
+    assert col.tick_async("DISK", spawn=d.spawn, post=d.post) is True
+
+
+def test_disk_mount_change_mid_read_rereads(cfg, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    cfg.set("disk.mount", str(tmp_path))
+    col, store, _, _ = make(cfg)
+    d = Deferred()
+    col.tick_async("DISK", spawn=d.spawn, post=d.post)
+    cfg.set("disk.mount", str(other))   # changed while the first read runs
+    d.work.pop(0)()
+    fn, args = d.posted.pop(0)
+    # The stale result is applied, then a fresh read for the new mount starts.
+    import smartpanel.collect.system as m
+    real_tick_async = col.tick_async
+    calls = []
+    col.tick_async = lambda cat, **kw: calls.append(cat) or real_tick_async(
+        cat, spawn=d.spawn, post=d.post)
+    fn(*args)
+    assert calls == ["DISK"]
+    d.run_all()
+    assert store.state.system.disk.mount == str(other)
+    assert m.OFF_LOOP == {"DISK"}
 
 
 def test_disk_unreadable_mount(cfg):

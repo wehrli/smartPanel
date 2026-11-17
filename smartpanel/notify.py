@@ -35,6 +35,11 @@ Public API (what collectors and services call)::
 * Returns True when the bubble was handed to a backend; False when it was
   logged instead (no backend, DND, or a failure). **It never raises.**
 
+`close(key) -> bool` withdraws the bubble last shown under that replacement
+key (GNOME never expires critical bubbles, so a cleared alert closes its own).
+A notification held by Do Not Disturb also closes the bubble it would have
+replaced, so a critical swap bubble can't outlive a recovery DND swallowed.
+
 Do Not Disturb (SP-2503): when `org.gnome.desktop.notifications show-banners`
 is false, everything but `swap_critical` goes to the log. The setting is read
 through `Gio.Settings`, guarded so a missing schema (non-GNOME desktop) means
@@ -55,10 +60,13 @@ the test suite ever reaches a real notification daemon.
 
 Legacy form: `send(summary, body, urgency, key=...)` (the v1 indicator) still
 works — a first argument that isn't a known kind is treated as a summary.
+A first argument that *looks* like a kind (`snake_case`) or an urgency outside
+low/normal/critical logs one WARNING per name, so a mistyped kind is visible.
 """
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -113,6 +121,10 @@ class _Backend:
              icon: str | None = None, action: Action | None = None) -> bool:
         raise NotImplementedError
 
+    def close(self, key: str) -> bool:
+        """Withdraw the bubble last shown under `key`. Default: nothing to close."""
+        return False
+
 
 class _LibNotify(_Backend):
     def __init__(self, notify_mod):
@@ -150,6 +162,18 @@ class _LibNotify(_Backend):
             note.add_action("default", action.label, cb, None)
             note.add_action("open", action.label, cb, None)
         note.show()
+        return True
+
+    def close(self, key: str) -> bool:
+        # Critical bubbles never expire on their own in GNOME, so a cleared
+        # alert must take its bubble down explicitly.
+        note = self._handles.pop(key, None)
+        if note is None:
+            return False
+        try:
+            note.close()
+        except Exception as e:  # noqa: BLE001 — already gone, daemon restarted…
+            log.debug("closing notification %r failed: %s", key, e)
         return True
 
 
@@ -243,6 +267,8 @@ class _GnomeBanners:
 # ───────────────────────── notifier ─────────────────────────
 
 _UNSET = object()
+_URGENCIES = ("low", "normal", "critical")
+_KIND_LIKE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)+")
 
 
 class Notifier:
@@ -251,6 +277,7 @@ class Notifier:
     def __init__(self, backend=_UNSET, banners_enabled: Callable[[], bool] | None = None):
         self._backend = backend
         self._banners_enabled = banners_enabled or _GnomeBanners()
+        self._warned_unknown: set[str] = set()
 
     def _get_backend(self) -> _Backend | None:
         if self._backend is _UNSET:
@@ -271,6 +298,7 @@ class Notifier:
             if spec is None:
                 # Legacy positional form: send(summary, body, urgency, key=...).
                 summary, body, legacy_urgency = kind, title, (body or "normal")
+                self._check_legacy(kind, urgency or legacy_urgency)
                 return self._show(summary, body, urgency or legacy_urgency,
                                   key or "smartpanel", None, action,
                                   bypass_dnd=(urgency or legacy_urgency) == "critical")
@@ -280,9 +308,34 @@ class Notifier:
             log.warning("notification failed (%s): %s — %s", e, title, body)
             return False
 
+    def _check_legacy(self, first: str, urgency: str) -> None:
+        """Make a mistyped kind loud: `send("journal_succeeded", ...)` would
+        otherwise show a bubble titled with the identifier."""
+        if first in self._warned_unknown:
+            return
+        if _KIND_LIKE.fullmatch(first) or urgency not in _URGENCIES:
+            self._warned_unknown.add(first)
+            log.warning("notify.send: %r is not a known kind (%s); treated as a "
+                        "legacy summary with urgency %r", first,
+                        ", ".join(sorted(KINDS)), urgency)
+
+    def close(self, key: str) -> bool:
+        """Take down the bubble shown under `key`, if any. Never raises."""
+        try:
+            backend = self._backend
+            if backend is _UNSET or backend is None:
+                return False     # nothing was ever shown
+            return bool(backend.close(key))
+        except Exception as e:  # noqa: BLE001
+            log.debug("close(%r) failed: %s", key, e)
+            return False
+
     def _show(self, summary, body, urgency, key, icon, action, *, bypass_dnd) -> bool:
         if not bypass_dnd and self._dnd():
             log.info("notification held by Do Not Disturb: %s — %s", summary, body)
+            # The update is held, but a bubble it would have replaced (e.g. a
+            # never-expiring critical swap bubble) must not outlive its alert.
+            self.close(key)
             return False
         backend = self._get_backend()
         if backend is None:
@@ -310,4 +363,13 @@ def send(kind: str, title: str = "", body: str = "", *,
                                        urgency=urgency)
     except Exception as e:  # noqa: BLE001
         log.warning("notification failed (%s): %s — %s", e, title, body)
+        return False
+
+
+def close(key: str) -> bool:
+    """Withdraw the bubble last shown under replacement `key`. Never raises."""
+    try:
+        return default_notifier().close(key)
+    except Exception as e:  # noqa: BLE001
+        log.debug("close(%r) failed: %s", key, e)
         return False
