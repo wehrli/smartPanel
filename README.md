@@ -1,164 +1,228 @@
 # smartPanel
 
-Live system metrics + Claude Code consumption in your GNOME top bar.
+System metrics, Claude Code spend and Claude session control, in your GNOME top bar.
 
-Inspired by [turing-smart-screen-python](https://github.com/aluzed/turing-smart-screen-python), but rendered into an Ubuntu panel applet instead of a USB LCD — and with Claude Code token/cost tracking baked in.
+Inspired by [turing-smart-screen-python](https://github.com/aluzed/turing-smart-screen-python),
+but drawn into the Ubuntu panel instead of a USB LCD, and with two things the original
+doesn't have: **what Claude Code costs you** (per project, per day, lifetime, read from
+the transcripts it already writes) and **the Claude sessions you have running** (see what
+each one is doing, answer it, focus it, close it with a journal entry).
 
-```
-● Activities  Files  Firefox   🔴🔃92% ⚡78% 🌡62° ⬇12M $1.34 🔋 🔊 22:14
-                                    ▲ click to expand
-                                   ┌──────────────────────────┐
-                                   │ CPU   ████████░░  78%    │
-                                   │       62°C  3.2 GHz       │
-                                   │ MEM   █████░░░░░  48%    │
-                                   │       15.4 / 32 GB        │
-                                   │ NET   ↓ 12.4 MB/s         │
-                                   │       ↑  0.3 MB/s         │
-                                   │ ─────────────────────────│
-                                   │ CLAUDE  today: $1.34      │
-                                   │   webapp       $0.82      │
-                                   │   apiserver    $0.31      │
-                                   │   cli-tool     $0.21      │
-                                   └──────────────────────────┘
-```
+![The top-bar item in five demo scenarios: busy, swap alert, nine sessions, first scan, no tmux](docs/screenshots/bar.png)
+
+The item reads left to right:
+
+- **Session strip**: one block per Claude session. Amber with a dot is *waiting on you*,
+  blue is *running*, grey is *idle*, `+3` when there are more than six.
+- **Live graphs**: a CPU histogram (last 10 samples), then a white memory meter and a grey
+  swap meter (amber, then red, when swap fills up).
+- **Numbers**: `swap · sessions/waiting · today's dollars`, e.g. `12 · 4/1 · 23.84`.
+  `⚠88` is the swap alert, `!` means tmux isn't installed, `reading 812/1284` is the first
+  transcript scan.
+
+Click it for the menu (system, today's spend, the first four sessions, actions);
+middle-click opens the dashboard. Settings → Top bar switches each part on or off, or
+replaces the numbers with a **ticker** that rotates one reading at a time
+(`$23.84 today ●○○○`); an alert pins itself there.
+
+<!-- Dashboard screenshots: run `./scripts/screenshots.sh --readme`, then uncomment.
+![Overview, dark](docs/screenshots/overview-dark.png)
+![Sessions cockpit](docs/screenshots/sessions-cockpit-dark.png)
+![Sessions board, light](docs/screenshots/sessions-board-light.png)
+![Spend receipts](docs/screenshots/spend-dark.png)
+![System during a swap alert](docs/screenshots/system-alert-light.png)
+-->
 
 ## Install
 
-Tested on Ubuntu 24.04 (GNOME, Wayland). Everything comes from apt — no pip, no venv:
+Tested on Ubuntu 24.04+ (GNOME, Wayland). Everything comes from apt: no pip, no venv.
 
 ```bash
 # 1. Dependencies (tmux + terminator are only needed for Claude session management)
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
-                 gir1.2-ayatanaappindicator3-0.1 gir1.2-notify-0.7 \
-                 python3-psutil python3-yaml tmux terminator
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 python3-cairo \
+                 gir1.2-notify-0.7 python3-psutil python3-yaml tmux terminator
 
-# 2. Get the source somewhere permanent. The service runs from this folder, so don't delete it.
+# 2. Get the source somewhere permanent. The service runs from this folder.
 git clone https://github.com/wehrli/smartPanel.git ~/apps/smartPanel
 cd ~/apps/smartPanel
-#    (or from a release tarball: tar -xzf smartpanel-0.1.0.tar.gz -C ~/apps)
 
 # 3. Install + start (systemd user service, autostarts on login)
-./scripts/install.sh
+./scripts/install.sh            # --dry-run shows what it would do and changes nothing
 ```
 
-`install.sh` checks the dependencies first and prints the exact `apt` line if anything is missing. It links `claude-tmux` into `~/.local/bin`, then installs and starts `~/.config/systemd/user/smartpanel.service`. If you have no `/journal` skill in `~/.claude`, it turns journal-on-close off (see below). Run it again after updating the folder. `./scripts/uninstall.sh` removes the service.
+`install.sh` checks the dependencies first and prints the exact `apt` line if anything is
+missing. Then it:
 
-To try it without installing: `python3 -m smartpanel --theme default` from the source folder.
+- puts `smartpanel` and `claude-tmux` in `~/.local/bin`,
+- creates `~/.config/smartpanel/` (settings live in `config.yaml` there),
+- installs `~/.config/systemd/user/smartpanel.service` (runs `python3 -m smartpanel`),
+- installs a D-Bus service file for `dev.omdev.SmartPanel`, so `smartpanel --dashboard`,
+  `smartpanel --palette` and the HUD start the app through systemd when it isn't running,
+- turns journal-on-close off if you have no `/journal` skill in `~/.claude` (see below).
 
-On non-Ubuntu GNOME (Fedora, Arch, vanilla GNOME) install the AppIndicator extension first:
-<https://extensions.gnome.org/extension/615/appindicator-support/>
+Run it again after updating the folder. `./scripts/uninstall.sh` removes all of it and
+keeps your settings. Logs: `journalctl --user -fu smartpanel`.
 
-To build the shareable tarball from a checkout: `./scripts/package.sh` → `dist/smartpanel-<version>.tar.gz`.
+On non-Ubuntu GNOME (Fedora, Arch, vanilla GNOME), install the AppIndicator extension
+first: <https://extensions.gnome.org/extension/615/appindicator-support/>.
+
+To build the shareable tarball from a checkout: `./scripts/package.sh` →
+`dist/smartpanel-<version>.tar.gz`.
+
+## How it works
+
+One Python process, GTK 4 + libadwaita, no GTK 3 and no AppIndicator library:
+
+1. **Collectors and services** poll the system (psutil), scan `~/.claude/projects/*.jsonl`
+   on a thread, and watch tmux. They write one shared state (`smartpanel/state/`).
+2. **The top-bar item** speaks StatusNotifierItem + DBusMenu over D-Bus itself. The graphs
+   and strip are a wide PNG drawn with cairo; the numbers are the item's text label.
+3. **The dashboard, palette and dialogs** are GTK 4 / libadwaita windows on the same state.
+4. **`dev.omdev.SmartPanel1`** on the session bus exposes the state and every action, for
+   the CLI verbs, the HUD extension and your own scripts.
+5. **The desktop HUD** is an optional GNOME Shell extension reading that D-Bus API.
+
+## The dashboard
+
+`smartpanel --dashboard [PAGE]`, middle-click on the item, or *Open dashboard* in the menu.
+Pages: **Overview**, **Sessions** (a cockpit list, or `sessions:board` for a board by
+state), **Spend** (daily receipts, budget, forecast), **System**, **Journal** (one receipt
+per closed session, `journal:<id>` opens one), **Settings**. `Ctrl+1`…`Ctrl+6` switch
+pages, `Ctrl+W` closes the window, `Ctrl+K` opens the palette.
+
+## Command palette
+
+Type to find any session, page or action: focus a session, answer its prompt, close it,
+start a new one, toggle the HUD, jump to a page.
+
+- **In the window**: `Ctrl+K`.
+- **Anywhere**: `smartpanel --palette`. Wayland doesn't let an app grab a global key, so
+  bind it yourself: GNOME Settings → Keyboard → View and Customize Shortcuts → Custom
+  Shortcuts → `+`, command `smartpanel --palette`, shortcut **Ctrl+Alt+Space** (the
+  default the menu shows; change `palette.shortcut` if you pick another).
+
+## Settings
+
+Edited in the Settings page; stored in `~/.config/smartpanel/config.yaml`. An environment
+variable, where there is one, wins over the file.
+
+| Key | Default | Env var | What it does |
+|---|---|---|---|
+| `bar.strip` | `true` | | One block per session in the top bar |
+| `bar.graphs` | `true` | | CPU histogram, memory and swap meters |
+| `bar.text` | `true` | | `swap · sessions/waiting · today's dollars` |
+| `bar.ticker` | `false` | | Rotate one reading at a time instead of the numbers |
+| `bar.ticker_seconds` | `5` | | Ticker period |
+| `swap.warn` | `60` | `SMARTPANEL_SWAP_WARN` | Percent at which the swap warning starts |
+| `swap.crit` | `85` | `SMARTPANEL_SWAP_CRIT` | Percent at which it turns critical |
+| `swap.hysteresis` | `5` | `SMARTPANEL_SWAP_HYSTERESIS` | Points below a line before stepping back down |
+| `swap.repeat_s` | `600` | `SMARTPANEL_SWAP_REPEAT` | Seconds before a sustained critical repeats (`0` = never) |
+| `budget.daily_usd` | off | | Daily budget, shown on Overview and every receipt |
+| `notifications.budget` | `true` | | Notify when today goes over budget |
+| `sessions.journal` | `true` | | Run `/journal` in a session before closing it |
+| `sessions.min_age_s` | `120` | `SMARTPANEL_JOURNAL_MIN_AGE` | Younger sessions close without a journal |
+| `sessions.confirm_seconds` | `5` | | The journal dialog says yes on its own after this |
+| `sessions.reattach` | `true` | `SMARTPANEL_FOCUS_REATTACH` | Re-attach in a new terminal when focus can't raise one |
+| `sessions.dir` | `~/dev/omdev` | `SMARTPANEL_SESSIONS_DIR` | Where the new-session folder picker opens |
+| `sessions.terminal` | `terminator` | `SMARTPANEL_TERMINAL` | Terminal for new sessions and re-attach |
+| `disk.mount` | `/` | | Disk shown on the System page |
+| `hud.enabled` | `false` | | Desktop HUD on/off |
+| `hud.corner` | `top-right` | | `top-left`, `top-right`, `bottom-left`, `bottom-right` |
+| `hud.margin` | `30` | | HUD distance from the screen edge, px |
+| `appearance.style` | `system` | | `light`, `dark`, or follow GNOME |
+| `palette.shortcut` | `<Ctrl><Alt>space` | | The shortcut the menu advertises (bind it in GNOME, above) |
+
+## Desktop HUD (optional)
+
+Today's spend, up to six sessions with their state, CPU / memory / swap / network and the
+swap alert, drawn on the wallpaper behind every window. It's a GNOME Shell extension
+(`smartpanel-hud@omdev.dev`) that reads the app over D-Bus:
+
+```bash
+./scripts/install-hud.sh        # then log out and back in (Wayland)
+gnome-extensions enable smartpanel-hud@omdev.dev
+smartpanel --hud on             # or the menu's "Desktop HUD", or Settings
+```
+
+Details in `extension/smartpanel-hud@omdev.dev/README.md`.
+
+## Demo mode
+
+Every screen runs on simulated data, without touching tmux, your transcripts or your
+settings file:
+
+```bash
+python3 -m smartpanel --demo busy       # also: calm alert empty many cold first notmux noswap
+python3 -m smartpanel --demo gallery    # every widget of the UI kit
+python3 -m smartpanel --demo alert --snapshot system --out /tmp/system.png --style dark
+./scripts/screenshots.sh                # every page × scenario × light/dark → docs/screenshots/all/
+```
+
+`--snapshot` renders offscreen (a private Broadway display), so it works over SSH and
+never shows a window.
 
 ## Themes
 
-Built-in presets:
+`--theme default` (the default) and `--theme claude-focus` are built in; `--theme
+/path/to/theme.yaml` loads your own. The YAML is a subset of the turing-smart-screen theme
+format, so an existing theme drops in (pixel-layout fields are ignored); its `INTERVAL`s
+set how often each category is polled.
 
-- `default` — balanced: CPU, memory, network, Claude summary.
-- `claude-focus` — Claude metrics first, system metrics secondary.
-
-Author your own — see `smartpanel/theme/presets/default.yaml` for the format. The theme YAML is a subset of the original turing-smart-screen theme format (so you can drop in an existing theme; pixel-layout fields are ignored) plus a `smartpanel:` block for top-bar templating and Claude options.
+**Top-bar precedence:** if a theme sets `smartpanel.top_bar_format`, that template is the
+bar's text and replaces the numbers / ticker (the strip and graphs still follow Settings).
+The shipped presets don't set one, so they use the composition above. Templates use the
+v1 names:
 
 ```yaml
-STATS:
-  CPU:
-    PERCENTAGE:
-      INTERVAL: 2
-      TEXT:  { SHOW: True }
-      GRAPH: { SHOW: True, MIN_VALUE: 0, MAX_VALUE: 100 }
-    TEMPERATURE:
-      INTERVAL: 5
-      TEXT:  { SHOW: True, SHOW_UNIT: True }
-  CLAUDE:
-    COST_TODAY:
-      INTERVAL: 30
-      TEXT:  { SHOW: True }
-
 smartpanel:
-  top_bar_format: "{SWAP.STATUS} ⚡{CPU.PERCENTAGE:.0f}% ${CLAUDE.COST_TODAY:.2f}"
-  menu_order: [CPU, MEMORY, NET, CLAUDE]
-  claude:
-    show_per_project: true
-    cost_horizon: today
+  top_bar_format: "{SWAP.STATUS} · {SESSIONS.STATUS} · ${CLAUDE.COST_TODAY:,.2f}"
+  # renders as: 🔃12% · 🧩4 ❓1 ▶2 · $23.84
 ```
+
+Available: `SWAP.STATUS` / `SWAP.ALERT` / `SWAP.PERCENTAGE`, `CPU.PERCENTAGE` /
+`TEMPERATURE`, `MEMORY.PERCENTAGE`, `DISK.USED_PERCENT`, `NET.DOWNLOAD` / `UPLOAD` (MB/s),
+`GPU.PERCENTAGE`, `CLAUDE.COST_TODAY` / `COST_WEEK` / `COST_LIFETIME` / `BURN_RATE` /
+`TOKENS_TODAY_HUMAN` / `CACHE_HIT_RATIO`, `SESSIONS.STATUS` / `COUNT` / `WAITING` /
+`RUNNING`. A template that doesn't place `{SWAP.…}` still gets the swap alert prefixed
+(`🔴🔃88% …`), because GNOME truncates labels from the right.
 
 ## Swap alert
 
-A full swap partition is the point where a Linux desktop stops being busy and
-starts thrashing — and it is invisible in the usual readouts, because RAM has
-been pinned at 100% for a while by then. smartPanel watches it and says so.
+A full swap partition is the point where a Linux desktop stops being busy and starts
+thrashing, and it's invisible in the usual readouts: RAM has been pinned at 100% for a
+while by then. smartPanel watches it and says so:
 
-**In the top bar**, the swap gauge is always on, and grows a severity glyph as
-soon as swap crosses the warning line:
+- **In the bar**: the swap meter turns amber, then red, and the number gets a `⚠`
+  (`⚠88 · 4/2 · 41.20`). With the ticker on, `⚠ Swap 88%` pins itself.
+- **As a notification**, once on the way up and once when it's back to normal.
+- **In the dashboard**, a banner above every page.
 
-```
-🔃12%      normal                (< 60%)
-⚠🔃62%     swap filling up       (≥ 60%)
-🔴🔃92%    swap almost full      (≥ 85%)
-🔃—        no swap configured
-```
+It doesn't nag. Entering a level notifies once; a *sustained* critical repeats every
+`swap.repeat_s`; dropping from critical to warning is silent; crossings use a
+`swap.hysteresis` band so swap hovering on a line can't flicker. A machine with no swap
+shows `—` and never alerts. Notifications go through libnotify, then `notify-send`, then a
+log line; a missing notification daemon never breaks the panel.
 
-It sits at the **front** of the label, because GNOME truncates long panel labels
-from the right — a warning on the right is exactly the part that gets eaten by
-the `…`. A theme that doesn't place the gauge itself still gets the alert
-prefixed onto its label while swap is high.
+## Claude spend
 
-**As a desktop notification**, once on the way up and once on the way back down:
+smartPanel reads `~/.claude/projects/<encoded-path>/*.jsonl`, the transcripts Claude Code
+already writes. No setup, no API calls. It shows spend today / this week / lifetime, burn
+rate, tokens, cache hit ratio, per project and per model, and a forecast against your
+budget. The first scan of a large history runs on a thread with progress in the bar
+(`reading 812/1284`); after that only changed files are re-read.
 
-```
-🔴 Swap almost full
-   Swap is 92% full (7.4 of 8.0 GiB). The system will start
-   thrashing — close something heavy.
-```
-
-It does not nag. Entering a level notifies once; a *sustained* critical repeats
-every 10 minutes; recovering to warning is silent (only the badge changes) and
-returning to normal says so once. Crossings use a 5-point hysteresis band, so
-swap hovering on a boundary can't flicker the badge or re-fire the bubble.
-
-**In the dashboard window**, a coloured banner pinned above everything else,
-plus a `🔃 Swap` section with the usual percentage / used / total rows.
-
-Tune it with environment variables (all optional):
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `SMARTPANEL_SWAP_WARN` | `60` | Percent at which the ⚠ badge appears |
-| `SMARTPANEL_SWAP_CRIT` | `85` | Percent at which it escalates to 🔴 |
-| `SMARTPANEL_SWAP_HYSTERESIS` | `5` | Points below a boundary before stepping back down |
-| `SMARTPANEL_SWAP_REPEAT` | `600` | Seconds before a still-critical alert repeats (`0` disables) |
-
-Swap is polled every 10s **regardless of the theme**, so the alert still works
-on a stock turing-smart-screen theme that has never heard of a `SWAP` category.
-Themes place the gauge with `{SWAP.STATUS}` in `top_bar_format` (what both
-shipped presets do), or `{SWAP.ALERT}` for the alert-only variant that stays
-empty while swap is fine. Either binding opts out of the automatic prefix, so
-the badge can never render twice. A machine with no swap configured reports `—`
-and never alerts.
-
-Notifications go through libnotify, falling back to `notify-send`, and finally
-to a log line. A missing notification daemon degrades the alert; it never
-breaks the panel.
-
-## Claude consumption
-
-smartPanel reads `~/.claude/projects/<encoded-path>/*.jsonl` — the same transcript files Claude Code already writes. No extra setup, no API calls.
-
-It surfaces:
-
-- Tokens today / this week / lifetime (input, output, cache hit ratio).
-- Estimated $ cost using current model pricing (Opus / Sonnet / Haiku tracked separately).
-- Per-project breakdown — top N projects by spend today.
-- **What the compliments cost** — see below.
-
-Pricing is hardcoded in `smartpanel/claude_stats/pricing.py`. Update it when Anthropic publishes new rates — PRs welcome.
+Costs are **estimates** from the per-model rates in `smartpanel/claude_stats/pricing.py`
+(Opus / Sonnet / Haiku, matched by model-id prefix; unknown models are priced as Opus).
+Update it when Anthropic changes pricing.
 
 ## Gratification counter
 
-How much are you paying for "Good question", "You're absolutely right", "Great goal — that's the right thing"? smartPanel scans the assistant's prose for gratification, sizes it in tokens, and prices it — so the "would I save anything by turning this off?" question has a number attached.
+How much are you paying for "Good question", "You're absolutely right", "Great goal —
+that's the right thing"? smartPanel finds gratification in the assistant's prose, sizes it
+in tokens and prices it:
 
 ```bash
-smartpanel --praise-report      # one-shot, no display server needed
+smartpanel --praise-report      # one-shot, no display needed (works over SSH)
 ```
 
 ```
@@ -166,113 +230,98 @@ smartpanel --praise-report      # one-shot, no display server needed
 today             7       111    $0.0083      $0.01      $0.02      0.01%
 week             11       189      $0.01      $0.01      $0.03      0.00%
 lifetime         66      1.0k      $0.08      $0.11      $0.19      0.01%
-
-Most expensive habits (lifetime)
-  you're right          24
-  good question         18
-  good idea             12
 ```
 
-The same numbers are panel metrics (`CLAUDE.PRAISE_COST_LIFETIME`, `PRAISE_TOKENS_TODAY`, `PRAISE_PHRASES_TODAY`, `PRAISE_SHARE`, and the `PRAISE_SUMMARY` / `TOP_PRAISE` blocks) — the `claude-focus` theme shows them all.
+- **written** is the output tokens spent saying it; **echoed** is every later turn
+  re-sending it as prompt, at the cache-read rate (usually the larger half).
+- Only assistant **prose** counts: thinking, tool calls, code and quotations are excluded.
+  A short sentence containing a compliment is charged whole; a long one that merely opens
+  with one, only its opening clause.
+- Tokens are **estimated** (~4 chars/token): transcripts record output tokens per message,
+  never per sentence. Treat it as an order of magnitude, not a bill.
 
-Two costs, because flattery is paid for twice:
+The phrase table at the top of `smartpanel/claude_stats/flattery.py` is meant to be edited.
 
-- **written** — the output tokens spent saying it, at the model's output rate.
-- **echoed** — every later turn in that session re-sends it as prompt, at the cache-read rate. On a long session this is usually the larger half.
+## Claude sessions
 
-What it measures, and what it can't:
-
-- Only assistant **prose** — thinking blocks, tool calls, fenced code and quoted text are excluded.
-- The unit is the **sentence**: a short sentence containing a compliment is counted whole, since that's what deleting it would remove. A long sentence that merely opens with one is charged only for its opening clause.
-- Token counts are **estimated** at ~4 chars/token — transcripts record `output_tokens` per message, never per sentence. Treat the totals as an order of magnitude, not a bill.
-
-Detection lives in `smartpanel/claude_stats/flattery.py`; the phrase table at the top of that file is meant to be edited.
-
-## Manage Claude sessions
-
-smartPanel can also see and control your running Claude Code sessions from the panel — provided you launch them inside tmux with the bundled launcher:
+smartPanel sees and controls Claude Code sessions that run inside tmux, started with the
+bundled launcher (or the *New session…* button):
 
 ```bash
-# Launch Claude in a managed tmux session named "claude-<cwd-basename>"
-./scripts/claude-tmux                 # or put it on your PATH
-./scripts/claude-tmux -n review       # name it "claude-review"
-./scripts/claude-tmux --model opus    # extra args are forwarded to `claude`
+claude-tmux                     # tmux session "claude-<folder>", in the current folder
+claude-tmux -n review           # "claude-review"
+claude-tmux --model opus        # extra args go to `claude`
 ```
 
-The dashboard's **🧩 Sessions** section then lists each live session with:
+Only tmux sessions named `claude-…` are ever listed or closed; your other tmux work is
+never touched. Sessions started with plain `claude` are invisible by design.
 
-- the **activity glyph** (below) and Claude's own conversation title,
-- **click the row** to bring that session's terminal to the front,
-- a per-session **✕** to close just that one, **⟳** to re-read its name,
-- **✕ Close all (N)** to close every managed session at once.
-
-The top bar shows the live count (`{SESSIONS.STATUS}` — built into both the `default` and `claude-focus` presets; add it to any theme). Only sessions whose tmux name starts with `claude-` are ever listed or killed, so your other tmux work is never touched.
-
-### What each session is doing
-
-Every row leads with a glyph saying what that session is up to right now, and the top-bar badge tallies them — `🧩4 ❓1 ▶2`, collapsing to `🧩4` when nothing is happening:
+**What each one is doing**, read from its tmux pane (a permission prompt never reaches the
+transcript, so the pane is the only place it exists):
 
 | Glyph | State | Meaning |
 |---|---|---|
-| ❓ | `waiting` | Blocked on **you** — a permission prompt, a plan approval, a question. Nothing moves until you answer. |
-| ▶ | `running` | Working: generating, running a tool, or waiting on a background agent. |
-| · | `idle` | Nothing happening; the input box is free. |
+| ❓ | waiting | Blocked on **you**: a permission prompt, a plan approval, a question. You can answer it from the dashboard or the palette. |
+| ▶ | running | Generating, running a tool, or waiting on a background agent. |
+| · | idle | Nothing happening. |
 
-This is read from the session's tmux pane, not its transcript — a permission prompt is a TUI state that never gets written to the transcript, so the pane is the only place it exists. Detection is structural (the modal's own footer and the shape of its choice list), so ordinary prose that happens to ask a question doesn't trip it.
-
-Three metrics are exposed for themes: `{SESSIONS.STATUS}` (the ready-made badge), `{SESSIONS.WAITING}` and `{SESSIONS.RUNNING}` (counts), alongside the existing `{SESSIONS.COUNT}` and `{SESSIONS.NAMES}`.
-
-### Clicking a session
-
-Clicking a row puts you in front of that session's terminal. How that happens depends on your desktop, because **GNOME Wayland does not let one application raise another's window** — `org.gnome.Shell.Eval` is disabled outside unsafe mode and `Shell.Introspect.GetWindows` answers `AccessDenied`, so there is no supported way in. smartPanel tries, in order:
-
-1. `SMARTPANEL_FOCUS_CMD` — your own command, with `{session}` and `{title}` placeholders.
-2. The [**Window Calls**](https://extensions.gnome.org/extension/4724/window-calls/) GNOME extension (`window-calls@domandoman.xyz`), which re-exposes window activation on D-Bus. **Install it if you want the real window raised in place** — it is the only route that works on stock GNOME Wayland.
-3. `wmctrl` / `xdotool`, for X11 and XWayland sessions.
-4. **Re-attach** — open a fresh terminal running `tmux attach -d` on that session. The old client is evicted and its window closes, so you end up with exactly one window per session. tmux owns the screen and the scrollback, so nothing is lost.
-
-Step 4 is the fallback that makes clicking work out of the box on Ubuntu. It replaces a window instead of raising one; set `SMARTPANEL_FOCUS_REATTACH=0` to turn it off if steps 1-3 already work for you.
-
-| Env var | Default | What it does |
-|---|---|---|
-| `SMARTPANEL_FOCUS_CMD` | *(unset)* | Command tried first, e.g. `wmctrl -a "{title}"`. |
-| `SMARTPANEL_FOCUS_REATTACH` | `1` | Allow the re-attach fallback. `0` disables it. |
-
-### Dashboard window
-
-The dropdown menu can overflow a small screen. For the full picture, open the **📊 Dashboard** — a scrollable window that pops up centered, showing every metric plus the live session list. Open it from the top menu item, or **middle-click** the tray icon. Closing it just hides it, so it reopens instantly.
+**Clicking a session** brings its terminal forward. GNOME Wayland doesn't let one app
+raise another's window, so smartPanel tries, in order: `SMARTPANEL_FOCUS_CMD` (your
+command, `{session}` / `{title}` placeholders); the
+[Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) extension, the
+one route that raises in place on Wayland; `wmctrl` / `xdotool` on X11; and finally a
+**re-attach**: a fresh terminal running `tmux attach -d`, which closes the old window, so
+you keep exactly one per session. tmux owns the screen and scrollback, so nothing is lost.
+Turn the last step off with `sessions.reattach`.
 
 ### Journal on close
 
-Closing a session from the dashboard offers to journal it — a Yes/No dialog that auto-confirms after 5s. Sessions younger than 2 minutes (`SMARTPANEL_JOURNAL_MIN_AGE`) close straight away without asking.
+Closing a session offers to journal it: a dialog that says yes on its own after
+`sessions.confirm_seconds`. Sessions younger than `sessions.min_age_s` just close.
 
-On Yes, smartPanel **types `/journal` into the session that's still running** and closes it only once the skill answers. The row shows `⏳ … journaling…` while it works.
+On yes, smartPanel **types `/journal <project>` into the running session** and closes it
+only once the skill answers. Running it live, rather than killing first and replaying the
+transcript, means the skill sees the actual conversation and can record *why* things were
+decided. The skill decides where the entry goes (yours appends to a monthly log) and
+returns one confirmation line.
 
-Running it in the live session — rather than killing first and resuming the transcript — means the skill's fork inherits the *actual conversation*, so it can record **why** things were decided, not just what changed. No transcript sweep can reconstruct that. The skill decides where the entry goes and returns one confirmation line.
+smartPanel also writes a receipt to `~/.claude/smartpanel/journals/<ts>-<project>.md`: that
+line plus a deterministic Activity section (duration, files, commands, tool counts), so a
+failed skill still leaves a record. The session is always closed, even if journaling
+fails. If the session already exited on its own, it falls back to a headless
+`claude -p --resume <id>`.
 
-smartPanel also drops a per-session receipt in `~/.claude/smartpanel/journals/<ts>-<project>.md` with that line plus a deterministic **Activity** section (duration, files touched, commands, tool counts) — so if the skill fails, you still get a record. And the session is always closed, even if journaling fails outright.
-
-If the session has already exited (you closed it in its own terminal), smartPanel falls back to resuming it headlessly:
-
-```
-claude -p --resume <session-id> --permission-mode acceptEdits --allowedTools …
-```
-
-Because the live route inherits the session's permission mode, `scripts/claude-tmux` starts sessions with **`--permission-mode acceptEdits`**. Without it the `/journal` skill's `git` sweep and file write would sit on a permission prompt nobody is watching until the timeout, and the session would close with no entry written. Pass your own `--permission-mode` (or `--dangerously-skip-permissions`) to override it, or set `SMARTPANEL_CLAUDE_PERMISSION_MODE=` empty to launch sessions with no mode flag at all — journaling then only works if you leave the session in accept-edits mode yourself (`shift+tab`).
+`claude-tmux` starts sessions in `--permission-mode acceptEdits`, because the live route
+inherits the session's mode: in manual mode the skill's `git` sweep and file write would
+sit on a prompt nobody is watching until the timeout.
 
 | Env var | Default | What it does |
 |---|---|---|
-| `SMARTPANEL_JOURNAL_SKILL` | `/journal` | Slash command to run. The project name is appended as its argument. Empty = journal-on-close off (what `install.sh` sets when you have no `/journal` skill). |
-| `SMARTPANEL_JOURNAL_TOOLS` | `Bash Read Write Edit Glob Grep Task TodoWrite` | Tool allowlist for the headless fallback. |
-| `SMARTPANEL_JOURNAL_MODEL` | *(session's own)* | Override the model for the headless fallback. |
-| `SMARTPANEL_JOURNAL_TIMEOUT` | `300` | Seconds before the run is abandoned. |
-| `SMARTPANEL_JOURNAL_IDLE_WAIT` | `120` | Seconds to wait for a busy session to finish its turn before giving up on the live route. |
-| `SMARTPANEL_JOURNAL_MIN_AGE` | `120` | Sessions shorter than this are never journaled. |
-| `SMARTPANEL_CLAUDE_PERMISSION_MODE` | `acceptEdits` | Permission mode new sessions launch with. Empty = pass no flag. |
+| `SMARTPANEL_JOURNAL_SKILL` | `/journal` | Slash command to run (project appended). Empty = off. |
+| `SMARTPANEL_JOURNAL_TOOLS` | `Bash Read Write Edit Glob Grep Task TodoWrite` | Tool allowlist for the headless fallback |
+| `SMARTPANEL_JOURNAL_MODEL` | the session's | Model for the headless fallback |
+| `SMARTPANEL_JOURNAL_TIMEOUT` | `300` | Seconds before a run is abandoned |
+| `SMARTPANEL_JOURNAL_IDLE_WAIT` | `120` | Seconds to wait for a busy session to go idle first |
+| `SMARTPANEL_CLAUDE_PERMISSION_MODE` | `acceptEdits` | Mode new sessions launch in (empty = no flag) |
+| `SMARTPANEL_FOCUS_CMD` | unset | Focus command tried first |
 
-Generation runs on a daemon thread, off the GLib loop. Skill runs are serialized — "Close all" journals sessions one at a time so they don't clobber a shared log file, and each session stays up until its own entry is written.
+Journal runs are serialized: *Close all* journals one session at a time so they don't
+clobber the shared log, and each stays up until its own entry is written.
 
-> Requires `tmux` (`sudo apt install tmux`).
+## Command line
+
+```
+smartpanel                      start (or, if running, open the dashboard)
+smartpanel --dashboard [PAGE]   open the dashboard on PAGE
+smartpanel --palette            open the command palette
+smartpanel --hud on|off|toggle  show or hide the desktop HUD
+smartpanel --demo SCENARIO      run on simulated data
+smartpanel --theme NAME|PATH    theme preset or .yaml
+smartpanel --praise-report      print the gratification report and exit (no display)
+smartpanel --snapshot PAGE --out FILE.png [--demo S] [--style light|dark] [--size WxH]
+```
+
+A second `smartpanel …` is forwarded to the running instance.
 
 ## License
 
