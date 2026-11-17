@@ -87,6 +87,7 @@ class SwapState:
     warn_at: float = 60.0
     crit_at: float = 85.0
     history: list[float] = field(default_factory=list)
+    alerted: bool = False                # a swap notification is out, recovery not yet sent
 
 
 @dataclass
