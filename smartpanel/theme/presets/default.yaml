@@ -88,9 +88,10 @@ STATS:
       LABEL: "Network ↑"
 
 smartpanel:
-  # {SWAP.STATUS} is the always-on swap gauge, and turns into the ⚠/🔴 alert
-  # in place. It leads because GNOME truncates the label from the right.
-  top_bar_format: "{SWAP.STATUS} · {SESSIONS.STATUS} · ${CLAUDE.COST_TODAY:,.2f} · {CLAUDE.TOKENS_TODAY_HUMAN}"
+  # No top_bar_format: the bar uses the v2 composition (session strip, CPU / memory /
+  # swap graphs, swap · sessions · spend text), switched in Settings → Top bar.
+  # A theme that sets `top_bar_format` here gets its own template instead (SP-1904),
+  # e.g.  top_bar_format: "{SWAP.STATUS} · {SESSIONS.STATUS} · ${CLAUDE.COST_TODAY:,.2f}"
   menu_order: [CLAUDE, CPU, MEMORY, SWAP, NET]
   claude:
     show_per_project: true
