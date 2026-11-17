@@ -182,7 +182,11 @@ def test_write_journal_writes_a_receipt_even_without_a_transcript(tmp_path, monk
     monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
     p = journal.write_journal("webapp", None, duration_s=60, run_skill=False)
     assert p is not None and p.exists()
-    assert p.read_text().startswith("# Session journal — webapp")
+    text = p.read_text()
+    assert text.startswith("---\n")
+    header, body = text[4:].split("\n---\n\n", 1)
+    assert "project: webapp" in header
+    assert body.startswith("# Session journal — webapp")
 
 
 def test_write_journal_runs_the_skill_with_the_sessions_id(tmp_path, monkeypatch):
