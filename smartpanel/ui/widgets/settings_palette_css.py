@@ -42,6 +42,7 @@ CSS = """
 }
 .sp-sp-unit { color: var(--sp-muted); }
 .sp-sp-error { color: var(--sp-crit); }
+row.sp-sp-row-error .subtitle { color: var(--sp-crit); opacity: 1; }
 entry.sp-sp-num { min-width: 0; }
 
 /* ── command palette (SP-2203) ── */
