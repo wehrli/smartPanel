@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
-from smartpanel.theme.loader import load_theme
+from smartpanel.theme.loader import DEFAULT_TOP_BAR_FORMAT, load_theme
 
 
 def _write(path: Path, body: str) -> Path:
@@ -94,3 +94,67 @@ def test_builtin_presets_load():
         theme = load_theme(here / name)
         assert theme.metrics, f"{name} has no metrics"
         assert theme.top_bar_format
+        # SP-1904: the shipped presets leave the bar to the v2 composition.
+        assert theme.top_bar_format_explicit is False, name
+
+
+# ───────────────────────── SP-1904 precedence ─────────────────────────
+
+def test_template_in_file_is_explicit(tmp_path: Path):
+    p = _write(tmp_path / "t.yaml", """
+        smartpanel:
+          top_bar_format: "⚡{CPU.PERCENTAGE:.0f}% 🧠{MEMORY.PERCENTAGE:.0f}%"
+    """)
+    theme = load_theme(p)
+    assert theme.top_bar_format_explicit is True
+    assert theme.top_bar_format == "⚡{CPU.PERCENTAGE:.0f}% 🧠{MEMORY.PERCENTAGE:.0f}%"
+
+
+def test_no_template_is_not_explicit(tmp_path: Path):
+    p = _write(tmp_path / "t.yaml", """
+        STATS:
+          CPU:
+            PERCENTAGE: { INTERVAL: 2 }
+    """)
+    theme = load_theme(p)
+    assert theme.top_bar_format_explicit is False
+    assert theme.top_bar_format == DEFAULT_TOP_BAR_FORMAT
+
+
+def test_blank_template_is_not_explicit(tmp_path: Path):
+    p = _write(tmp_path / "t.yaml", """
+        smartpanel:
+          top_bar_format: "   "
+    """)
+    assert load_theme(p).top_bar_format_explicit is False
+
+
+def test_explicit_template_equal_to_the_default_still_wins(tmp_path: Path):
+    """Told apart by *where it came from*, not by its text: a custom theme that
+    happens to spell the loader default (or an old preset template) keeps it."""
+    from smartpanel.tray import barspec
+    p = _write(tmp_path / "t.yaml", f"""
+        smartpanel:
+          top_bar_format: "{DEFAULT_TOP_BAR_FORMAT}"
+    """)
+    assert barspec.theme_template(load_theme(p)) == DEFAULT_TOP_BAR_FORMAT
+
+
+def test_custom_theme_wins_presets_compose():
+    from smartpanel.tray import barspec
+    here = Path(__file__).parent.parent / "smartpanel" / "theme" / "presets"
+    for name in ("default.yaml", "claude-focus.yaml"):
+        assert barspec.theme_template(load_theme(here / name)) is None
+
+
+def test_original_turing_theme_composes(tmp_path: Path):
+    """A turing-smart-screen theme has no `smartpanel:` block: composition."""
+    p = _write(tmp_path / "t.yaml", """
+        STATS:
+          CPU:
+            PERCENTAGE:
+              INTERVAL: 1
+              TEXT: { SHOW: True, X: 5, Y: 35 }
+    """)
+    from smartpanel.tray import barspec
+    assert barspec.theme_template(load_theme(p)) is None

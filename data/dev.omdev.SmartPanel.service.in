@@ -1,0 +1,10 @@
+# D-Bus session service: lets `smartpanel --dashboard` / `--palette`, the HUD
+# extension and any dev.omdev.SmartPanel1 client start the app on demand.
+# Installed by scripts/install.sh into ~/.local/share/dbus-1/services/.
+# SystemdService hands activation to the user unit, so the app always runs under
+# smartpanel.service (one instance, one cgroup, journald logs); Exec is the fallback
+# for a bus without systemd activation.
+[D-BUS Service]
+Name=dev.omdev.SmartPanel
+Exec=/usr/bin/env PYTHONPATH=@REPO@ @PYTHON@ -m smartpanel
+SystemdService=smartpanel.service

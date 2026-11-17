@@ -1,0 +1,38 @@
+#!/bin/sh
+# Written by smartPanel's scripts/install.sh: run the app from its source tree.
+#
+# Unless the call is local-only, it first pings dev.omdev.SmartPanel on the session
+# bus. If the app isn't running, that ping D-Bus-activates it through
+# smartpanel.service, so the app always starts under systemd (its own cgroup,
+# journald logs, Type=dbus readiness) and never as a child of this shell; the
+# python call below then just forwards the verb (a bare `smartpanel` opens the
+# dashboard). Starting it here instead would leave a stray instance that owns the
+# bus name, so a later `systemctl --user start smartpanel` could never own it.
+#
+# Local-only, no ping: --demo, --snapshot, --gallery, --praise-report, -h/--help,
+# --theme (a custom theme has to start a fresh process to apply), --debug-timing
+# (profiles this process: stop the service first) and any SMARTPANEL_APP_ID run.
+REPO="@REPO@"
+PY="@PYTHON@"
+
+local_only=""
+module="smartpanel"
+[ -n "${SMARTPANEL_APP_ID:-}" ] && local_only=1
+for arg in "$@"; do
+  case "$arg" in
+    --demo|--demo=*|--snapshot|--snapshot=*|--gallery|--praise-report|-h|--help|--theme|--theme=*)
+      local_only=1 ;;
+    --debug-timing)
+      # `python -m smartpanel.timing` installs the main-loop timing hook, drops
+      # this flag and runs the normal CLI; it prints a report on exit.
+      local_only=1; module="smartpanel.timing" ;;
+  esac
+done
+
+if [ -z "$local_only" ] && command -v gdbus >/dev/null 2>&1; then
+  timeout 15 gdbus call --session --dest dev.omdev.SmartPanel \
+    --object-path /dev/omdev/SmartPanel \
+    --method org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1 || true
+fi
+
+PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m "$module" "$@"

@@ -1,14 +1,24 @@
+# Installed by scripts/install.sh as ~/.config/systemd/user/smartpanel.service.
+# The python, repo path and journal line below were filled in by the installer.
 [Unit]
-Description=smartPanel — system + Claude metrics in the GNOME top bar
+Description=smartPanel: system metrics, Claude Code spend and sessions in the GNOME top bar
 After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-Type=simple
-ExecStart=@PYTHON@ -m smartpanel --theme default
+# Type=dbus: "started" means the app owns dev.omdev.SmartPanel, which is also what
+# D-Bus activation (data/dev.omdev.SmartPanel.service.in) waits for.
+Type=dbus
+BusName=dev.omdev.SmartPanel
+ExecStart=@PYTHON@ -m smartpanel
 WorkingDirectory=@REPO@
+Environment=PYTHONPATH=@REPO@
 Restart=on-failure
 RestartSec=5
+# KillMode stays control-group (the default) on purpose: everything this unit spawns
+# dies with it. Terminals for Claude sessions are the exception, and they handle it
+# themselves: sessions/launch.py starts each one in its own `systemd-run --user
+# --scope`, so a restart of this service never takes tmux or a session down with it.
 @JOURNAL_ENV@
 
 [Install]

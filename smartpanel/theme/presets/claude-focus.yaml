@@ -71,7 +71,10 @@ STATS:
       LABEL: "Swap total"
 
 smartpanel:
-  top_bar_format: "{SWAP.STATUS} · {SESSIONS.STATUS} · ${CLAUDE.COST_TODAY:.2f} · ⚡{CPU.PERCENTAGE:.0f}%"
+  # No top_bar_format: the bar uses the v2 composition (session strip, CPU / memory /
+  # swap graphs, swap · sessions · spend text), switched in Settings → Top bar.
+  # A theme that sets `top_bar_format` here gets its own template instead (SP-1904),
+  # e.g.  top_bar_format: "{SWAP.STATUS} · {SESSIONS.STATUS} · ${CLAUDE.COST_TODAY:,.2f}"
   menu_order: [CLAUDE, CPU, MEMORY, SWAP]
   claude:
     show_per_project: true

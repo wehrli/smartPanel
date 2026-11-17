@@ -1,31 +1,8 @@
-from __future__ import annotations
+"""Raw sensor reads used by `collect/system.py`.
 
-from typing import Callable
-
-from smartpanel.sensors import system, gpu, claude, sessions as sessions_sensor
-
-SensorFn = Callable[[], dict[str, float | str | None]]
-
-SENSORS: dict[str, SensorFn] = {
-    "CPU": system.cpu,
-    "MEMORY": system.memory,
-    "SWAP": system.swap,
-    "DISK": system.disk,
-    "NET": system.network,
-    "BATTERY": system.battery,
-    "GPU": gpu.gpu,
-    "CLAUDE": claude.claude_stats,
-    "SESSIONS": sessions_sensor.sessions,
-}
-
-
-def read(category: str) -> dict[str, float | str | None]:
-    fn = SENSORS.get(category)
-    if fn is None:
-        return {}
-    try:
-        return fn() or {}
-    except Exception as e:  # never let a sensor crash the loop
-        import logging
-        logging.getLogger(__name__).warning("sensor %s failed: %s", category, e)
-        return {}
+`system.py` (CPU / memory / swap / disk / network / temperature / battery, psutil)
+and `gpu.py` (NVIDIA via pynvml, AMD via sysfs) are plain functions returning
+`{METRIC: value}`; they never raise and report an unreadable value as `None`.
+The v1 registry and its Claude / sessions sensors went with the GTK 3 indicator:
+spend now comes from `services/spend.py`, sessions from `services/sessions.py`.
+"""

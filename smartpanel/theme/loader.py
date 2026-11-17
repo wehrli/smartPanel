@@ -8,10 +8,17 @@ from smartpanel.theme.model import ClaudeOptions, MetricRender, Theme
 
 _RENDERER_KEYS = {"TEXT", "GRAPH", "LINE_GRAPH", "RADIAL"}
 
+# What `top_bar_format` holds when a theme doesn't set one. It is never rendered
+# on its own: `top_bar_format_explicit` is False and the composition wins.
+DEFAULT_TOP_BAR_FORMAT = "⚡{CPU.PERCENTAGE:.0f}%"
+
 
 def load_theme(path: str | Path) -> Theme:
     """Load a theme YAML. Compatible with turing-smart-screen-python theme files:
-    pixel-layout fields are silently ignored; only structural data is consumed."""
+    pixel-layout fields are silently ignored; only structural data is consumed.
+
+    `smartpanel.top_bar_format`, when present and non-empty, marks the theme's
+    template as explicit: it then wins over the v2 bar composition (SP-1904)."""
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
@@ -69,9 +76,12 @@ def load_theme(path: str | Path) -> Theme:
         top_n_projects=int(claude_cfg.get("top_n_projects", 5)),
     )
 
+    template = sp.get("top_bar_format")
+    explicit = isinstance(template, str) and template.strip() != ""
     return Theme(
         metrics=metrics,
-        top_bar_format=str(sp.get("top_bar_format", "⚡{CPU.PERCENTAGE:.0f}%")),
+        top_bar_format=str(template) if explicit else DEFAULT_TOP_BAR_FORMAT,
+        top_bar_format_explicit=explicit,
         menu_order=list(sp.get("menu_order", []) or []),
         claude=claude,
         author=str(data.get("author", "")),

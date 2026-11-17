@@ -1,5 +1,5 @@
 """Snapshot -> SpendState (SP-0804, SP-1002, SP-1101) and agreement with the CLI
-report and the legacy sensor (SP-0811), on the realistic transcript fixtures."""
+report (SP-0811), on the realistic transcript fixtures."""
 from __future__ import annotations
 
 from datetime import date
@@ -129,17 +129,3 @@ def test_state_figures_match_the_praise_report(snap):
     assert rows["today"][3] == _usd(s.days[0].praise_cost_usd)
     week_praise = sum(d.praise_cost_usd + d.praise_echo_cost_usd for d in s.days[:7])
     assert rows["week"][5] == _usd(week_praise)
-
-
-def test_state_figures_match_the_legacy_sensor(snap, monkeypatch):
-    from smartpanel.sensors import claude as sensor
-    monkeypatch.setitem(sensor._CACHE, "snapshot", snap)
-    monkeypatch.setitem(sensor._CACHE, "ts", float("inf"))
-    v = sensor.claude_stats()
-    s = build_spend_state(snap)
-    assert v["COST_TODAY"] == pytest.approx(s.cost_today)
-    assert v["COST_WEEK"] == pytest.approx(s.cost_week)
-    assert v["COST_LIFETIME"] == pytest.approx(s.cost_lifetime)
-    assert v["TOKENS_TODAY_HUMAN"] == s.tokens_today_human
-    assert v["BURN_RATE"] == pytest.approx(s.burn_per_hour)
-    assert v["CACHE_HIT_RATIO"] == pytest.approx(s.cache_hit_pct)

@@ -33,8 +33,18 @@ class ClaudeOptions:
 
 @dataclass
 class Theme:
+    """A loaded theme.
+
+    Top-bar precedence (SP-1904): when the YAML sets `smartpanel.top_bar_format`,
+    `top_bar_format_explicit` is True and that template renders the bar label
+    instead of the v2 composition (A1 text / A5 ticker); the A6 strip and A4 graphs
+    still draw beside it. The shipped presets set no template, so they get the
+    composition. `None` means "not loaded from a file": the tray then falls back
+    to comparing `top_bar_format` with the loader default and the presets.
+    """
     metrics: list[MetricRender] = field(default_factory=list)
     top_bar_format: str = "⚡{CPU.PERCENTAGE:.0f}%"
+    top_bar_format_explicit: bool | None = None
     menu_order: list[str] = field(default_factory=list)
     claude: ClaudeOptions = field(default_factory=ClaudeOptions)
     author: str = ""
