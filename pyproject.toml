@@ -26,7 +26,7 @@ smartpanel = "smartpanel.cli:main"
 include = ["smartpanel*"]
 
 [tool.setuptools.package-data]
-smartpanel = ["theme/presets/*.yaml"]
+smartpanel = ["theme/presets/*.yaml", "dbus/*.xml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
