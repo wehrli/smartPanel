@@ -57,6 +57,7 @@
 .smartpanel-hud-waiting    { color: #ffc65c; }
 .smartpanel-hud-running    { color: #a9cdfa; }
 .smartpanel-hud-journaling { color: #e3a5ea; }
+.smartpanel-hud-launching  { color: #ffffff; } /* prototype: 'starting' is not dimmed */
 .smartpanel-hud-idle,
 .smartpanel-hud-unknown    { color: rgba(255, 255, 255, 0.6); }
 
