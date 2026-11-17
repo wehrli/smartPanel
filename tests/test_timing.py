@@ -117,8 +117,8 @@ def test_install_wraps_glib_sources_and_uninstall_restores(clock):
         clock.advance_ms(120)
         return False
 
-    timing.install(glib=glib)
-    timing.install(glib=glib)        # idempotent: wrappers are not stacked
+    timing.install(glib=glib, watchdog=False)
+    timing.install(glib=glib, watchdog=False)        # idempotent: wrappers are not stacked
     assert timing.installed()
     assert glib.timeout_add(1000, slow_cb, "a", priority=5) == 1
     assert glib.idle_add(slow_cb, "b") == 3
@@ -172,3 +172,87 @@ def test_report_lists_worst_first(clock):
     assert out[2].split()[0] == "a.fast"
     timing.reset()
     assert timing.report() == "no callbacks timed"
+
+
+# ── names a profiling run can act on ──
+
+def test_forwarding_closure_is_named_after_its_target():
+    from smartpanel.services.spend import GLibScheduler
+
+    posted = []
+    sched = GLibScheduler.__new__(GLibScheduler)
+    sched._GLib = types.SimpleNamespace(idle_add=posted.append)
+
+    class SpendService:
+        def _apply(self):
+            pass
+
+    sched.idle_add(SpendService()._apply)
+    name = timing.callback_name(posted[0])
+    assert name.startswith("services.spend.GLibScheduler.idle_add.<locals>.once -> ")
+    assert name.endswith("SpendService._apply")
+
+
+def test_explicit_name_wins():
+    def cb():
+        pass
+    cb.__smartpanel_name__ = "tray.repaint"
+    assert timing.callback_name(cb) == "tray.repaint"
+
+
+def test_closure_over_data_keeps_its_own_name():
+    x = 3
+
+    def cb():
+        return x
+    assert timing.callback_name(cb).endswith("test_closure_over_data_keeps_its_own_name.<locals>.cb")
+
+
+# ── loop-lag watchdog: catches what the wrappers can't (signal / D-Bus handlers) ──
+
+def test_watchdog_logs_lag_over_budget_with_last_callback(clock, caplog):
+    timing.record("tray.Tray._paint", 4)
+    dog = timing.Watchdog(interval_ms=25)
+    with caplog.at_level(logging.WARNING, "smartpanel.timing"):
+        assert dog.tick(0.0) == 0.0
+        assert dog.tick(0.030) == pytest.approx(5)        # 5 ms late: fine
+        lag = dog.tick(0.030 + 0.145)                     # blocked by a click handler
+    assert lag == pytest.approx(120)
+    assert len(caplog.records) == 1
+    msg = caplog.records[0].getMessage()
+    assert "blocked ~120 ms" in msg and "tray.Tray._paint" in msg
+    st = timing.stats()[timing.LAG_NAME]
+    assert (st.slow, round(st.worst_ms)) == (1, 120)
+
+
+def test_install_starts_and_uninstall_stops_the_watchdog(clock):
+    added, removed = [], []
+    glib = types.SimpleNamespace(
+        timeout_add=lambda ms, fn, *a, **k: added.append((ms, fn)) or 41,
+        timeout_add_seconds=lambda *a, **k: 2,
+        idle_add=lambda *a, **k: 3,
+        source_remove=removed.append)
+    timing.install(glib=glib)
+    assert added and added[0][0] == timing.HEARTBEAT_MS
+    assert added[0][1]() is True                          # heartbeat keeps itself alive
+    timing.uninstall()
+    assert removed == [41]
+
+
+def test_run_strips_the_flag_installs_and_reports(monkeypatch, capsys):
+    seen = {}
+    monkeypatch.setattr(timing, "install", lambda: seen.setdefault("installed", True))
+    import smartpanel.cli as cli
+    monkeypatch.setattr(cli, "main", lambda argv: seen.setdefault("argv", argv) and 0)
+    assert timing.run(["--debug-timing", "--demo", "busy"]) == 0
+    assert seen == {"installed": True, "argv": ["--demo", "busy"]}
+    assert capsys.readouterr().err.strip()          # the report
+
+
+def test_watchdog_labels_the_first_late_tick_as_startup(clock, caplog):
+    timing.record("tray.Tray._paint", 4)
+    dog = timing.Watchdog(interval_ms=25)
+    dog.last = 0.0                                        # as start() leaves it
+    with caplog.at_level(logging.WARNING, "smartpanel.timing"):
+        dog.tick(0.5)
+    assert "startup, before the first heartbeat" in caplog.records[0].getMessage()
