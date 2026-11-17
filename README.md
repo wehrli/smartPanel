@@ -25,13 +25,14 @@ middle-click opens the dashboard. Settings → Top bar switches each part on or 
 replaces the numbers with a **ticker** that rotates one reading at a time
 (`$23.84 today ●○○○`); an alert pins itself there.
 
-<!-- Dashboard screenshots: run `./scripts/screenshots.sh --readme`, then uncomment.
-![Overview, dark](docs/screenshots/overview-dark.png)
-![Sessions cockpit](docs/screenshots/sessions-cockpit-dark.png)
-![Sessions board, light](docs/screenshots/sessions-board-light.png)
-![Spend receipts](docs/screenshots/spend-dark.png)
-![System during a swap alert](docs/screenshots/system-alert-light.png)
--->
+The dashboard (demo data; regenerate with `./scripts/screenshots.sh --readme`):
+
+![Overview, dark: today's spend, CPU / memory / swap, the session waiting on you, the session list, the daily budget and today by project](docs/screenshots/overview-dark.png)
+![Overview, light](docs/screenshots/overview-light.png)
+![Sessions cockpit: a permission prompt answered from its buttons, running sessions with what they are doing](docs/screenshots/sessions-cockpit-dark.png)
+![Sessions board, light: needs you, running and idle columns, with a drop zone to journal and close](docs/screenshots/sessions-board-light.png)
+![Spend: fourteen days and today's receipt, by project and model, compliments included](docs/screenshots/spend-dark.png)
+![System during a critical swap alert](docs/screenshots/system-alert-light.png)
 
 ## Install
 
