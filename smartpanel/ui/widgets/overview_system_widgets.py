@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Callable
 
 from smartpanel.ui.widgets import overview_system_model as m
+from gi.repository import Pango
+
 from smartpanel.ui.widgets._gi import Adw, GLib, Gtk
 from smartpanel.ui.widgets.labels import ActivityGlyph
 
@@ -19,6 +21,7 @@ CSS = """
 .os-page { padding: 16px; }
 .sp-empty.os-compact { padding: 18px 16px; }
 .os-scard { padding: 12px 13px; }
+.os-scard.sp-na { opacity: 0.75; }   /* SP-0602: no sensor / no swap, dimmed */
 .os-cap-wait { color: var(--sp-wait); }
 
 /* metric cards in a FlowBox: the child box must not draw a focus ring */
@@ -151,6 +154,7 @@ class SessionRow(Gtk.ListBoxRow):
     """glyph · title button (title, sub-line) · age | journal step · ⟳ · ✕"""
 
     RETITLE_MIN_MS = 500
+    JOURNAL_FLOOR_CHARS = 24
     RETITLE_MAX_MS = 3000
 
     def __init__(self, name: str, *, on_focus: Callable[[str], None],
@@ -173,7 +177,7 @@ class SessionRow(Gtk.ListBoxRow):
         self.title_button.set_tooltip_text("Bring its terminal forward")
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         head = Gtk.Box(spacing=6)
-        self.title = Gtk.Label(xalign=0, ellipsize=3, hexpand=False)
+        self.title = Gtk.Label(xalign=0, ellipsize=3, hexpand=False, width_chars=6)
         self.title.add_css_class("os-title")
         head.append(self.title)
         self.spinner = _spinner()
@@ -187,7 +191,7 @@ class SessionRow(Gtk.ListBoxRow):
         self.title_button.connect("clicked", lambda *_: on_focus(self.name))
         box.append(self.title_button)
 
-        self.right = Gtk.Label(xalign=1, ellipsize=3, max_width_chars=30)
+        self.right = Gtk.Label(xalign=1, ellipsize=3, max_width_chars=48)
         self.right.add_css_class("os-age")
         box.append(self.right)
 
@@ -216,9 +220,14 @@ class SessionRow(Gtk.ListBoxRow):
         toggle_class(self.right, "os-jt", row.journaling)
         toggle_class(self.right, "os-age", not row.journaling)
         self.right.set_tooltip_text(row.right if row.journaling else None)
-        # an ellipsizing label's minimum is its width_chars: keep the journal
-        # step readable instead of letting the title squeeze it to "⏳ Sk…"
-        self.right.set_width_chars(min(len(row.right), 18) if row.journaling else -1)
+        # an ellipsizing label's minimum is its width_chars and its natural
+        # width the full text: the title (ellipsize END) gives way first, down
+        # to its own floor; below JOURNAL_FLOOR_CHARS the step ellipsizes in
+        # the MIDDLE so the "…/2026-11.md…" tail stays readable
+        self.right.set_width_chars(min(len(row.right), self.JOURNAL_FLOOR_CHARS)
+                                   if row.journaling else -1)
+        self.right.set_ellipsize(Pango.EllipsizeMode.MIDDLE if row.journaling
+                                 else Pango.EllipsizeMode.END)
         for b in (self.title_button, self.retitle_button, self.close_button):
             if b.get_sensitive() == row.busy:
                 b.set_sensitive(not row.busy)

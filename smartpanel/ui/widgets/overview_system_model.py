@@ -235,7 +235,7 @@ def budget(spend: SpendState) -> Budget | None:
 # entry reads as a bar on both the light card (#fff) and the dark one (#363636).
 PROJECT_PALETTE: tuple[str, ...] = (
     "#e95420", "#f6a05c", "#62a0ea", "#9a7fd1",
-    "#2ec27e", "#e66100", "#c061cb", "#1c9fa8",
+    "#2ec27e", "#e5a50a", "#c061cb", "#1c9fa8",
 )
 OTHERS_COLOR = "#9a9996"
 MAX_PROJECT_ROWS = 6
@@ -246,7 +246,33 @@ def project_color(name: str) -> str:
 
     (Python's `hash()` is salted per process, so it can't be used here.)
     """
-    return PROJECT_PALETTE[zlib.crc32(name.encode("utf-8")) % len(PROJECT_PALETTE)]
+    return PROJECT_PALETTE[_slot(name)]
+
+
+def _slot(name: str) -> int:
+    return zlib.crc32(name.encode("utf-8")) % len(PROJECT_PALETTE)
+
+
+def project_colors(names) -> dict[str, str]:
+    """Distinct colours for the projects shown together.
+
+    Each name starts at its CRC32 slot and keeps it unless an earlier name (in
+    sorted order, so the result doesn't depend on ranking) already took it; then
+    it linear-probes to the next free slot. With more names than palette
+    entries the palette wraps. The Spend page should call this with the same
+    set so both pages agree.
+    """
+    n = len(PROJECT_PALETTE)
+    used: set[int] = set()
+    out: dict[str, str] = {}
+    for name in sorted(set(names)):
+        slot = _slot(name)
+        if len(used) < n:
+            while slot in used:
+                slot = (slot + 1) % n
+        used.add(slot)
+        out[name] = PROJECT_PALETTE[slot]
+    return out
 
 
 @dataclass(frozen=True)
@@ -260,7 +286,9 @@ class ProjectBar:
 def project_bars(projects, limit: int = MAX_PROJECT_ROWS) -> list[ProjectBar]:
     """Largest first, at most `limit` rows plus one 'others' row for the rest."""
     items = sorted((p for p in projects if p.cost_usd > 0), key=lambda p: -p.cost_usd)
-    rows = [(p.name, p.cost_usd, project_color(p.name)) for p in items[:limit]]
+    shown = items[:limit]
+    colors = project_colors(p.name for p in shown)
+    rows = [(p.name, p.cost_usd, colors[p.name]) for p in shown]
     rest = items[limit:]
     if rest:
         rows.append((f"{len(rest)} others", sum(p.cost_usd for p in rest), OTHERS_COLOR))

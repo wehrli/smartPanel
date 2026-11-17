@@ -137,6 +137,20 @@ def test_project_colours_are_stable_and_from_the_palette():
     assert len(colours) >= 4                       # spread, not all one colour
 
 
+def test_project_colours_are_distinct_among_shown_rows():
+    busy = sc.loaded_spend(NOW).projects_today
+    bars = m.project_bars(busy)
+    assert len(bars) >= 4
+    assert len({b.color for b in bars}) == len(bars)
+    # no near-duplicate oranges in the palette any more
+    assert "#e66100" not in m.PROJECT_PALETTE
+    # the resolver is independent of ranking order, so Spend can share it
+    names = [b.name for b in bars]
+    assert m.project_colors(names) == m.project_colors(reversed(names))
+    assert len(set(m.project_colors(sc.PROJECTS).values())) == min(
+        len(set(sc.PROJECTS)), len(m.PROJECT_PALETTE))
+
+
 def test_project_bars_largest_first_with_others():
     projects = [ProjectSpend(f"p{i}", float(i)) for i in range(1, 10)]
     bars = m.project_bars(projects)
@@ -265,8 +279,22 @@ def test_overview_actions_go_through_actions():
     assert ("focus_session", (name,)) in actions.calls
     assert ("request_close", (name,)) in actions.calls
     assert ("retitle_session", (name,)) in actions.calls
-    assert ("open_dashboard", ("sessions",)) in actions.calls
+    assert ("open_dashboard", ("sessions:cockpit",)) in actions.calls      # SP-1209
     assert ("open_dashboard", ("settings",)) in actions.calls
+    page.dispose_page()
+
+
+@needs_display
+def test_retitle_toast_only_settles_the_oldest_pending_row():
+    store, actions, page = _overview("busy")
+    (a, ra), (b, rb) = list(page._rows.items())[:2]
+    ra.retitle_button.emit("clicked")
+    rb.retitle_button.emit("clicked")
+    assert page._retitle_pending == [a, b]
+    store.emit(Event("toast", {"text": "Title re-read from tmux"}))
+    assert page._retitle_pending == [b]           # b's spinner is still in flight
+    store.emit(Event("toast", {"text": "Closed."}))
+    assert page._retitle_pending == [b]
     page.dispose_page()
 
 

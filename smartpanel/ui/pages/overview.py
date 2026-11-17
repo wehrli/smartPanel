@@ -32,6 +32,8 @@ SCROLLS = True                 # the page owns its ScrolledWindow (inside the br
 CHART_W, CHART_H = 120, 30     # min chart size; charts expand with their card
 AGE_TICK_S = 20                # session ages / waiting times, only while mapped
 NARROW = "max-width: 620sp"
+MID = "max-width: 760sp"         # metric grid goes 2x2 here: never 3+1
+RIGHT_W = 270                  # right column: fixed, so the split never shifts
 RETITLE_TOAST = "Title re-read from tmux"
 
 
@@ -48,6 +50,7 @@ class OverviewPage(Adw.BreakpointBin):
         self._rows: dict[str, SessionRow] = {}
         self._order: dict[str, int] = {}
         self._needs: dict[str, NeedsRow] = {}
+        self._retitle_pending: list[str] = []      # FIFO of retitles awaiting their toast
         self._tick = 0
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -64,8 +67,15 @@ class OverviewPage(Adw.BreakpointBin):
                                       vexpand=True, hexpand=True, child=clamp)
         self.set_child(scroller)
 
+        # only the last matching breakpoint applies, so NARROW repeats MID's setter
+        mid = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(MID))
+        mid.add_setter(self.metrics, "max-children-per-line", 2)
+        self.add_breakpoint(mid)
         bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(NARROW))
+        bp.add_setter(self.metrics, "max-children-per-line", 2)
         bp.add_setter(self.cols, "orientation", Gtk.Orientation.VERTICAL)
+        bp.add_setter(self.right_col, "width-request", -1)
+        bp.add_setter(self.right_clamp, "maximum-size", 10000)
         self.add_breakpoint(bp)
 
         self._unsub = store.subscribe(self._on_changed)
@@ -161,8 +171,10 @@ class OverviewPage(Adw.BreakpointBin):
         return col
 
     def _build_right(self) -> Gtk.Widget:
-        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, valign=Gtk.Align.START)
-        col.set_size_request(250, -1)
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, valign=Gtk.Align.START,
+                      hexpand=False)
+        col.set_size_request(RIGHT_W, -1)
+        self.right_col = col
         self.right_stack = Gtk.Stack(vhomogeneous=False, hhomogeneous=False,
                                      transition_type=Gtk.StackTransitionType.NONE)
 
@@ -225,7 +237,11 @@ class OverviewPage(Adw.BreakpointBin):
         self.right_stack.add_named(loading, "loading")
 
         col.append(self.right_stack)
-        return col
+        # the clamp caps the natural width at RIGHT_W and width-request floors
+        # it there: every state (normal/first/loading) is exactly RIGHT_W wide
+        self.right_clamp = Adw.Clamp(maximum_size=RIGHT_W, tightening_threshold=RIGHT_W,
+                                     child=col, valign=Gtk.Align.START)
+        return self.right_clamp
 
     # ───────────────────────── live updates ─────────────────────────
 
@@ -243,9 +259,14 @@ class OverviewPage(Adw.BreakpointBin):
             self._update_sessions()
 
     def _on_event(self, event) -> None:
+        # The toast carries no session name (see notes), so match it to the
+        # oldest retitle still in flight rather than clearing every spinner.
         if event.kind == "toast" and (event.data or {}).get("text") == RETITLE_TOAST:
-            for row in self._rows.values():
-                row.retitle_done()
+            while self._retitle_pending:
+                row = self._rows.get(self._retitle_pending.pop(0))
+                if row is not None and row.retitling:
+                    row.retitle_done()
+                    break
 
     @property
     def state(self) -> PanelState:
@@ -374,13 +395,16 @@ class OverviewPage(Adw.BreakpointBin):
         self.actions.focus_session(name)
 
     def _retitle(self, name: str) -> None:
+        if name in self._retitle_pending:
+            self._retitle_pending.remove(name)
+        self._retitle_pending.append(name)
         self.actions.retitle_session(name)
 
     def _close(self, name: str) -> None:
         self.actions.request_close(name)
 
     def _answer(self, _name: str) -> None:
-        self.actions.open_dashboard("sessions")
+        self.actions.open_dashboard("sessions:cockpit")
 
     # ───────────────────────── age ticker ─────────────────────────
 
