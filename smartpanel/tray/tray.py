@@ -173,8 +173,9 @@ class Tray:
         sni.set_label(spec.label, spec.guide)
         sni.set_tooltip("smartPanel", spec.accessible_desc)
         if spec.icon is None:
+            # Loading / plain icon. `_icon_applied` is kept: when loading ends with
+            # the same IconSpec, the existing PNG is shown again without a render.
             self._cancel_pending_icon()
-            self._icon_applied = None
             sni.set_icon(spec.icon_name, spec.icon_desc)
         else:
             self._apply_icon(spec.icon, spec.icon_desc, force)
@@ -195,10 +196,12 @@ class Tray:
                (b.strip, b.strip_more, b.graphs, b.swap_level, b.swap_pct is None)
 
     def _apply_icon(self, icon: barspec.IconSpec, desc: str, force: bool = False) -> None:
-        if icon == self._icon_applied and not force:
+        current = self.icons.current
+        if (icon == self._icon_applied and not force and current is not None
+                and current.exists()):
             self._cancel_pending_icon()
             if self.sni:
-                self.sni.set_icon(self.sni.props["IconName"], desc)
+                self.sni.set_icon(str(current), desc)
             return
         applied = self._icon_applied
         if force or self._structural(applied, icon):

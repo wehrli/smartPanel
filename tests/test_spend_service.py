@@ -468,3 +468,20 @@ def test_cold_scan_of_1200_files_keeps_every_main_loop_callback_under_50ms(tmp_p
     assert store.state.spend.cost_today > 0
     assert store.state.app.first_run is False
     assert max(timings) < 0.05, max(timings)
+
+
+def test_progress_hand_offs_are_capped_at_four_a_second(tmp_path):
+    now = [100.0]
+    svc, store, _, sched, _, _ = make(tmp_path, monotonic=lambda: now[0])
+    svc._running = True
+    seen = []
+    store.subscribe(lambda secs: "app" in secs and seen.append(store.state.app.loading))
+    # 1000 files over 2 s of scanning: one progress call every 2 ms.
+    for done in range(1, 1001):
+        svc._progress(done, 1000)
+        now[0] += 0.002
+    sched.pump()
+    assert spend_mod.PROGRESS_MIN_INTERVAL_S == 0.25
+    assert 8 <= len(seen) <= 10          # ~2 s / 0.25 s, plus the final file
+    assert seen[0] == Loading(1, 1000)   # the first one is never held back
+    assert seen[-1] == Loading(1000, 1000)

@@ -10,7 +10,8 @@ How it runs (SP-0801):
   `refresh_now()` while busy queues exactly one follow-up run instead.
 - The worker builds the whole `SpendState` (pure, `claude_stats.spend_state`) and hands
   it back with `idle_add`; only the main thread touches the Store.
-- The first scan reports `app.loading = Loading(done, total)` (files), throttled, and
+- The first scan reports `app.loading = Loading(done, total)` (files), throttled to
+  4 updates a second (each one repaints the tray and the dashboard), and
   clears it when the result lands (SP-2601). `app.first_run` is true while
   `~/.claude/projects` is missing or holds no `*.jsonl` (SP-2603).
 - Budget: the forecast is recomputed on every result and whenever `budget.daily_usd`
@@ -42,7 +43,10 @@ from smartpanel.state.model import Event, Loading
 log = logging.getLogger(__name__)
 
 INTERVAL_S = 15
-PROGRESS_MIN_INTERVAL_S = 0.1       # throttle for loading-progress hand-offs
+# Loading-progress hand-offs: at most 4 a second. Each one changes `app`, which
+# repaints every surface showing the progress (tray label + menu, dashboard), and
+# at 10/s those idle callbacks measured 61-87 ms on a cold scan.
+PROGRESS_MIN_INTERVAL_S = 0.25
 
 Notifier = Callable[[str, str, str, Any], None]   # (kind, title, body, action)
 
@@ -160,7 +164,8 @@ class SpendService:
                  scheduler=None, aggregator: Aggregator | None = None,
                  notifier: Notifier | None = None,
                  interval_s: int = INTERVAL_S,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time,
+                 monotonic: Callable[[], float] = time.monotonic):
         self.store, self.config = store, config
         self.claude_root = Path(claude_root) if claude_root else None
         self._agg = aggregator or Aggregator(claude_root=self.claude_root)
@@ -168,6 +173,7 @@ class SpendService:
         self._notify = notifier or default_notifier
         self._interval = interval_s
         self._clock = clock
+        self._monotonic = monotonic
 
         self._timer: int | None = None
         self._unsub_config: Callable[[], None] | None = None
@@ -175,7 +181,7 @@ class SpendService:
         self._busy = False          # main-thread flag: a refresh is in flight
         self._again = False         # refresh_now() arrived while busy
         self._scanned = False       # first result has landed
-        self._last_progress = 0.0   # worker-thread throttle
+        self._last_progress: float | None = None   # worker-thread throttle
         self._snapshot: Snapshot | None = None
         self._file_costs: dict[str, float] = {}
         self._alerts = BudgetAlerts()
@@ -287,8 +293,9 @@ class SpendService:
         sched.idle_add(lambda: self._apply(snap, spend, costs))
 
     def _progress(self, done: int, total: int) -> None:
-        now = time.monotonic()
-        if done < total and now - self._last_progress < PROGRESS_MIN_INTERVAL_S:
+        now = self._monotonic()
+        last = self._last_progress
+        if done < total and last is not None and now - last < PROGRESS_MIN_INTERVAL_S:
             return
         self._last_progress = now
         self._scheduler().idle_add(lambda: self._show_progress(done, total))

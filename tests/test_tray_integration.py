@@ -375,3 +375,21 @@ def test_theme_template_guide_is_stable(bus, tmp_path):
         assert len(guide) >= len("🔴🔃100% ⚡87% · 4")
     finally:
         tray.stop()
+
+
+def test_loading_progress_never_renders_the_png(setup):
+    """Cold-scan progress only moves the label; when it ends with the same
+    IconSpec the existing PNG comes back without a render."""
+    app, host, watcher, store, actions, config, tray, signals, tmp = setup
+    spin(timeout=0.05)
+    n = tray.icon_renders
+    before = tray.sni.props["IconName"]
+    assert before.endswith(".png")
+    ld = fx.loading().app.loading
+    for done in (100, 400, 812):
+        store.update("app", loading=type(ld)(done=done, total=ld.total))
+    assert tray.sni.props["IconName"] == "process-working-symbolic"
+    assert tray.icon_renders == n
+    store.update("app", loading=None)
+    assert tray.sni.props["IconName"] == before
+    assert tray.icon_renders == n
