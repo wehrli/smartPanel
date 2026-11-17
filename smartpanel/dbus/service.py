@@ -12,8 +12,9 @@ the object on the connection it is handed, so the name and the object share a li
 
 What the interface does
 -----------------------
-- ``GetState(as sections) -> s``: ``Store.to_json(sections)``; an empty list means every
-  section. An unknown section name is an ``InvalidArgs`` error, not a silent empty dict.
+- ``GetState(as sections) -> s``: the JSON of ``Store.to_dict(sections)`` with system
+  histories trimmed (below); an empty list means every section, ``['hud']`` is the
+  reduced HUD view. An unknown section name is an ``InvalidArgs`` error, not a silent empty dict.
 - ``Version`` (``u``) is the JSON schema version (``SCHEMA_VERSION``). Consumers should
   check it once on connect and refuse/degrade on a mismatch.
 - ``Changed(as sections)`` is **coalesced**: store notifications are collected and
@@ -35,20 +36,37 @@ What the interface does
 Low-rate consumers (the desktop HUD extension, SP-2301)
 -------------------------------------------------------
 The HUD only shows the spend line, the session list, four metrics and the swap alert
-level, and refreshes every 5 s rather than every 2 s. It does not need a dedicated
-method; it uses the same API with a section filter:
+level, and refreshes every 5 s rather than every 2 s. Rather than a new method (the
+interface in panel1.xml is fixed), ``GetState`` accepts the pseudo-section ``"hud"``,
+which returns a small reduced view built by ``hud_view()``::
 
-1. On connect, read ``Version``; then ``GetState(['spend', 'sessions', 'system', 'app'])``
-   once (``app`` carries ``loading`` / ``first_run`` for the ``…`` and ``—`` states).
-2. Subscribe to ``Changed``. When it fires, intersect its sections with the four above;
-   if the intersection is non-empty, mark the HUD *dirty* — do not fetch yet.
-3. Run one 5 s timer. On each tick, if dirty, call ``GetState`` with **only the dirty
-   sections** and merge the result into the cached state, then redraw.
+    {"hud": {
+        "spend":    {"cost_today", "tokens_today", "tokens_today_human", "burn_per_hour"},
+        "sessions": [{"name", "title", "activity", "phase"}, ...],   # display order
+        "metrics":  {"cpu", "memory", "swap", "disk"},                # percents or null
+        "swap_level": int,                                            # LEVEL_* of alerts
+        "loading":  null | {"done", "total"},   # HUD shows "…" while non-null
+        "first_run": bool                       # HUD shows "—"
+    }}
 
-That gives the HUD a hard ceiling of one small call per 5 s, zero calls while nothing
-changes, and no extra code here. ``system`` is the biggest section (history arrays);
-a HUD that only wants the latest values can still request it — at one call per 5 s the
-cost is negligible. ``Event`` can be ignored by the HUD.
+No history arrays, no per-day breakdowns, no prompts. ``"hud"`` must be requested
+**alone**: mixing it with real sections is an ``InvalidArgs`` error, so a reply is either
+a slice of the state tree or the HUD view, never an ambiguous mix.
+
+The rate limit is the client's, by design (a signal-driven server cannot know a
+consumer's cadence). The recipe:
+
+1. On connect, read ``Version``; then ``GetState(['hud'])`` once.
+2. Subscribe to ``Changed``. When it fires and its sections intersect ``HUD_SECTIONS``
+   (``spend``, ``sessions``, ``system``, ``app``), mark the HUD *dirty* — do not fetch.
+3. Run one 5 s timer. On each tick, if dirty, call ``GetState(['hud'])``, clear the
+   flag, redraw.
+
+That gives the HUD a hard ceiling of one small call per 5 s and zero calls while
+nothing changes. ``Event`` can be ignored by the HUD.
+
+History trimming (SP-0006): the Store keeps up to 300 points per series, but over D-Bus
+every ``history*`` list under ``system`` is cut to its newest ``HISTORY_POINTS`` (60).
 
 Threading: this object lives on the main thread. Store listeners run on the main
 thread (the Store contract), D-Bus method calls are dispatched on the main context the
@@ -73,6 +91,9 @@ OBJECT_PATH = "/dev/omdev/SmartPanel"
 INTERFACE = "dev.omdev.SmartPanel1"
 SCHEMA_VERSION = 1
 CHANGED_WINDOW_MS = 250
+HISTORY_POINTS = 60                      # newest points per series sent over D-Bus
+HUD = "hud"                              # GetState pseudo-section (SP-2301)
+HUD_SECTIONS = ("spend", "sessions", "system", "app")   # what the HUD view reads
 
 ERROR_FAILED = f"{INTERFACE}.Error.Failed"
 ERROR_INVALID_ARGS = "org.freedesktop.DBus.Error.InvalidArgs"
@@ -102,15 +123,72 @@ def interface_info() -> Gio.DBusInterfaceInfo:
 
 
 def parse_sections(sections: list[str] | tuple[str, ...]) -> set[str] | None:
-    """GetState's ``as`` argument -> Store.to_json's filter. Empty means all."""
+    """GetState's ``as`` argument -> Store.to_json's filter. Empty means all.
+
+    ``["hud"]`` is returned as ``{"hud"}``; ``"hud"`` mixed with anything else is an
+    error.
+    """
     if not sections:
         return None
+    if HUD in sections:
+        if any(s != HUD for s in sections):
+            raise InvalidArgs(f"'{HUD}' must be requested alone")
+        return {HUD}
     unknown = [s for s in sections if s not in SECTIONS]
     if unknown:
         raise InvalidArgs(
             f"unknown section(s) {', '.join(map(repr, unknown))}; "
-            f"expected any of {', '.join(SECTIONS)}")
+            f"expected any of {', '.join(SECTIONS)} (or '{HUD}' alone)")
     return set(sections)
+
+
+def trim_histories(state: dict, points: int = HISTORY_POINTS) -> dict:
+    """Cut every ``history*`` list under ``state['system']`` to its newest ``points``."""
+    system = state.get("system")
+    if isinstance(system, dict):
+        for part in system.values():
+            if isinstance(part, dict):
+                for key, val in part.items():
+                    if key.startswith("history") and isinstance(val, list) \
+                            and len(val) > points:
+                        part[key] = val[-points:]
+    return state
+
+
+def hud_view(state) -> dict:
+    """PanelState -> the reduced HUD view (see the module docstring)."""
+    sp, sy, app = state.spend, state.system, state.app
+    return {
+        "spend": {
+            "cost_today": sp.cost_today,
+            "tokens_today": sp.tokens_today,
+            "tokens_today_human": sp.tokens_today_human,
+            "burn_per_hour": sp.burn_per_hour,
+        },
+        "sessions": [
+            {"name": s.name, "title": s.display_title,
+             "activity": s.activity, "phase": s.phase}
+            for s in state.sessions.items
+        ],
+        "metrics": {
+            "cpu": sy.cpu.percent,
+            "memory": sy.memory.percent,
+            "swap": sy.swap.percent,
+            "disk": sy.disk.percent,
+        },
+        "swap_level": int(sy.swap.level),
+        "loading": to_dict(app.loading),
+        "first_run": bool(app.first_run),
+    }
+
+
+def state_json(store, sections: set[str] | None) -> str:
+    """GetState's reply body."""
+    if sections == {HUD}:
+        body = {HUD: hud_view(store.state)}
+    else:
+        body = trim_histories(store.to_dict(sections))
+    return json.dumps(body, separators=(",", ":"))
 
 
 def decode_setting(key: str, json_value: str) -> Any:
@@ -237,7 +315,7 @@ class PanelService:
         try:
             args = params.unpack() if params is not None else ()
             if method == "GetState":
-                payload = self.store.to_json(parse_sections(args[0]))
+                payload = state_json(self.store, parse_sections(args[0]))
                 invocation.return_value(GLib.Variant("(s)", (payload,)))
                 return
             entry = _ACTIONS.get(method)

@@ -22,6 +22,7 @@ readable message.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Callable
 
 from gi.repository import Gio, GLib
@@ -30,6 +31,8 @@ BUS_NAME = "dev.omdev.SmartPanel"
 OBJECT_PATH = "/dev/omdev/SmartPanel"
 INTERFACE = "dev.omdev.SmartPanel1"
 DEFAULT_TIMEOUT_MS = 5000
+
+log = logging.getLogger(__name__)
 
 # Method name -> GVariant input signature (mirrors panel1.xml).
 SIGNATURES: dict[str, str] = {
@@ -119,7 +122,11 @@ class PanelClient:
     # ── signals (delivered on the caller's thread-default main context) ──
     def _subscribe(self, signal: str, handler: Callable[[tuple], None]) -> Callable[[], None]:
         def on_signal(_conn, _sender, _path, _iface, _name, params):
-            handler(params.unpack())
+            # Never raise into the GLib loop, whatever the sender put on the bus.
+            try:
+                handler(params.unpack())
+            except Exception:
+                log.exception("%s handler failed", signal)
 
         sub = self.connection.signal_subscribe(
             self.bus_name, INTERFACE, signal, OBJECT_PATH, None,
@@ -136,4 +143,13 @@ class PanelClient:
         return self._subscribe("Changed", lambda p: callback(list(p[0])))
 
     def watch_events(self, callback: Callable[[str, dict], None]) -> Callable[[], None]:
-        return self._subscribe("Event", lambda p: callback(p[0], json.loads(p[1] or "{}")))
+        return self._subscribe("Event", lambda p: callback(p[0], _loads_dict(p[1])))
+
+
+def _loads_dict(text: str) -> dict:
+    try:
+        data = json.loads(text or "{}")
+    except ValueError:
+        log.warning("Event data is not JSON: %.80r", text)
+        return {}
+    return data if isinstance(data, dict) else {}

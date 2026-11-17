@@ -392,3 +392,117 @@ def test_parse_sections():
 def test_introspection_xml_is_package_data():
     xml = svc_mod.introspection_xml()
     assert 'interface name="dev.omdev.SmartPanel1"' in xml
+
+
+# ── SP-2301: the reduced HUD view ──
+
+def test_get_state_hud_view_is_reduced(env):
+    store, _a, _svc, client = env
+    store.update("spend", cost_today=23.84, tokens_today=41_200_000,
+                 tokens_today_human="41.2M", burn_per_hour=3.1)
+
+    def fill(system):
+        system.cpu.percent, system.memory.percent = 12.0, 64.0
+        system.swap.percent, system.swap.level = 92.0, 2
+        system.disk.percent = 71.0
+        system.cpu.history = [1.0] * 300
+    store.mutate("system", fill)
+    store.mutate("sessions", lambda s: s.items.extend([
+        Session(name="claude-a", project="a", title="Fix it", activity="waiting",
+                phase="none"),
+        Session(name="claude-b", project="b"),
+    ]))
+    store.update("app", first_run=False)
+
+    state = in_thread(lambda: client.get_state(["hud"]))
+    assert set(state) == {"hud"}
+    hud = state["hud"]
+    assert set(hud) == {"spend", "sessions", "metrics", "swap_level", "loading",
+                        "first_run"}
+    assert hud["spend"] == {"cost_today": 23.84, "tokens_today": 41_200_000,
+                            "tokens_today_human": "41.2M", "burn_per_hour": 3.1}
+    assert hud["metrics"] == {"cpu": 12.0, "memory": 64.0, "swap": 92.0, "disk": 71.0}
+    assert hud["swap_level"] == 2
+    assert hud["loading"] is None and hud["first_run"] is False
+    assert [set(s) for s in hud["sessions"]] == [{"name", "title", "activity", "phase"}] * 2
+    assert hud["sessions"][0]["title"] == "Fix it"
+    assert hud["sessions"][1]["title"] == "b"          # display_title fallback
+
+    def no_lists_of_numbers(obj):
+        if isinstance(obj, dict):
+            return all(no_lists_of_numbers(v) for v in obj.values())
+        if isinstance(obj, list):
+            return all(isinstance(v, dict) and no_lists_of_numbers(v) for v in obj)
+        return True
+    assert no_lists_of_numbers(hud), "HUD view must carry no history arrays"
+
+
+def test_get_state_hud_loading(env):
+    store, _a, _svc, client = env
+    from smartpanel.state.model import Loading
+    store.update("app", loading=Loading(done=3, total=10), first_run=True)
+    hud = in_thread(lambda: client.get_state(["hud"]))["hud"]
+    assert hud["loading"] == {"done": 3, "total": 10}
+    assert hud["first_run"] is True
+
+
+def test_get_state_hud_must_be_alone(env):
+    _s, _a, _svc, client = env
+    with pytest.raises(PanelError) as err:
+        in_thread(lambda: client.get_state(["hud", "spend"]))
+    assert err.value.name == "org.freedesktop.DBus.Error.InvalidArgs"
+    assert "alone" in err.value.message
+
+
+# ── SP-0006: histories are trimmed to the newest 60 points over D-Bus ──
+
+def test_get_state_trims_system_histories(env):
+    store, _a, _svc, client = env
+
+    def fill(system):
+        system.cpu.history = [float(i) for i in range(100)]
+        system.net.history_down = [float(i) for i in range(100)]
+        system.memory.history = [1.0] * 10
+    store.mutate("system", fill)
+    system = in_thread(lambda: client.get_state(["system"]))["system"]
+    assert system["cpu"]["history"] == [float(i) for i in range(40, 100)]
+    assert len(system["net"]["history_down"]) == svc_mod.HISTORY_POINTS == 60
+    assert system["memory"]["history"] == [1.0] * 10
+    assert len(store.state.system.cpu.history) == 100     # the Store is untouched
+
+
+def test_trim_histories_pure():
+    state = {"system": {"cpu": {"history": list(range(5)), "percent": 1},
+                        "updated_at": None},
+             "spend": {"hourly_today": list(range(24))}}
+    out = svc_mod.trim_histories(state, points=2)
+    assert out["system"]["cpu"]["history"] == [3, 4]
+    assert len(out["spend"]["hourly_today"]) == 24       # only system.* is trimmed
+
+
+def test_parse_sections_hud():
+    assert svc_mod.parse_sections(["hud"]) == {"hud"}
+    with pytest.raises(svc_mod.InvalidArgs):
+        svc_mod.parse_sections(["hud", "app"])
+
+
+# ── client robustness: spoofed / malformed signals never raise into the loop ──
+
+def test_client_survives_malformed_event_and_failing_handler(env):
+    _store, _a, service, client = env
+    got = []
+    undo = client.watch_events(lambda kind, data: got.append((kind, data)))
+    calls = []
+
+    def boom(sections):
+        calls.append(sections)
+        raise RuntimeError("handler bug")
+    undo2 = client.watch_changed(boom)
+    pump(0.05)
+    service._emit("Event", GLib.Variant("(ss)", ("toast", "{not json")))
+    service._emit("Event", GLib.Variant("(ss)", ("toast", "[1, 2]")))
+    service._emit("Changed", GLib.Variant("(as)", (["spend"],)))
+    assert pump(2, until=lambda: len(got) == 2 and calls)
+    undo()
+    undo2()
+    assert got == [("toast", {}), ("toast", {})]
