@@ -98,25 +98,44 @@ def _open_log(path: str) -> Runner:
             opener(path)
             return
         # No Actions verb for "open a file" yet (see the WP report): hand the file to
-        # the desktop's default editor, and fall back to the Journal page.
-        if not _launch_default(path):
-            actions.open_dashboard("journal")
+        # the desktop's default editor asynchronously, and land on the Journal page
+        # when there is nothing to open or the launch fails.
+        _launch_default(path, lambda: actions.open_dashboard("journal"))
     return run
 
 
-def _launch_default(path: str) -> bool:
+def _launch_default(path: str, on_fail: Callable[[], None]) -> None:
+    """Open `path` with its default app without blocking the main loop.
+
+    `launch_default_for_uri_async` resolves the handler and spawns it (possibly
+    via D-Bus / the portal) off the loop; `on_fail` runs from its callback.
+    """
     import os
     full = os.path.expanduser(path)
     if not os.path.exists(full):
-        return False
+        on_fail()
+        return
     try:
         import gi
         gi.require_version("Gio", "2.0")
         from gi.repository import Gio
-        return bool(Gio.AppInfo.launch_default_for_uri(Gio.File.new_for_path(full).get_uri(),
-                                                       None))
     except Exception:  # noqa: BLE001
-        return False
+        on_fail()
+        return
+
+    def done(_src, result):
+        try:
+            ok = Gio.AppInfo.launch_default_for_uri_finish(result)
+        except Exception:  # noqa: BLE001
+            ok = False
+        if not ok:
+            on_fail()
+
+    try:
+        Gio.AppInfo.launch_default_for_uri_async(Gio.File.new_for_path(full).get_uri(),
+                                                 None, None, done)
+    except Exception:  # noqa: BLE001
+        on_fail()
 
 
 def build_commands(state: PanelState, config: Any = None) -> list[Command]:

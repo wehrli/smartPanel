@@ -214,7 +214,7 @@ def test_add_shortcut_writes_only_to_the_injected_backend(make):
     assert page.add_shortcut(c)
     entry = ks.find_existing(backend)
     assert entry["binding"] == "<Ctrl><Alt>space"
-    assert entry["command"] == "smartpanel --palette"
+    assert ks.is_palette_command(entry["command"]) and entry["command"] != "smartpanel --palette"
     assert c.button.get_sensitive() is False and c.button.get_label() == "Shortcut added"
     assert events and events[-1].kind == "toast" and not events[-1].data["error"]
 
@@ -254,3 +254,28 @@ def test_money_helpers():
     assert parse_money("nan") == (False, None)
     assert format_money(None) == "" and format_money(25.0) == "25"
     assert format_money(12.5) == "12.50"
+
+
+def test_rotate_hint_follows_rotate_every(make):
+    page, _store, _actions, config, _ = make()
+    ticker = page.controls["bar.ticker"]
+    assert "every 5 s" in ticker.row.get_subtitle()
+    config.set("bar.ticker_seconds", 10)
+    assert ticker.row.get_subtitle() == ("Replaces the numbers with one reading every 10 s. "
+                                         "Alerts pin themselves.")
+
+
+def test_spin_only_holds_off_sync_while_typing(make):
+    page, _store, actions, config, _ = make()
+    c = page.controls["hud.margin"]
+    c.adj.set_value(c.adj.get_value() + 1)        # a +/- click: not "editing"
+    page.flush()
+    assert not c.editing()
+    config.set("hud.margin", 40)                  # e.g. over D-Bus
+    assert c.adj.get_value() == 40
+    c.spin.set_text("123")                        # half-typed digits
+    assert c.editing()
+    c.sync(50, "SMARTPANEL_HUD_MARGIN")           # value held, override still shows
+    assert c.adj.get_value() == 40
+    assert c.row.get_sensitive() is False
+    assert c.row.get_subtitle() == "Set by SMARTPANEL_HUD_MARGIN"

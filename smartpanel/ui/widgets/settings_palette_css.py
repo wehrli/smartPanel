@@ -78,6 +78,12 @@ window.sp-sp-palette { border-radius: 16px; }
   background-color: var(--sp-sel);
   color: var(--sp-fg);
 }
+/* the ⏎ cap sits on the --sp-sel row, where --sp-btn is nearly the same grey */
+.sp-sp-pal-list > row:selected .sp-sp-kbd, .sp-sp-pal-list > row.sp-sp-sel .sp-sp-kbd {
+  background-color: alpha(var(--sp-fg), 0.16);
+  border: 1px solid alpha(var(--sp-fg), 0.24);
+  color: var(--sp-fg);
+}
 .sp-sp-pal-glyph { min-width: 20px; }
 .sp-sp-pal-sub { color: var(--sp-muted); font-size: 0.86em; }
 .sp-sp-pal-none { color: var(--sp-muted); padding: 26px; }

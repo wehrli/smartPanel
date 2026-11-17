@@ -123,7 +123,11 @@ class Control:
     # values in, values out
     def sync(self, value: Any, env: str | None) -> None:
         if self._timer or self.editing():
-            return              # don't fight the user's hand
+            # Don't fight the user's hand over the value, but an env override
+            # appearing or going away still has to show.
+            if env != self._env:
+                self.set_override(env)
+            return
         self._syncing = True
         try:
             self._show(value)
@@ -289,7 +293,17 @@ class NumberControl(Control):
             u = Gtk.Label(label=unit, width_chars=3, xalign=0)
             u.add_css_class("sp-sp-unit")
             self.row.add_suffix(u)
-        self.adj.connect("value-changed", lambda *_: self.commit_later(self.pending_value))
+        self.adj.connect("value-changed", self._value_changed)
+        self._typing = False
+        self.spin.connect("changed", self._on_text_changed)
+        self.spin.connect("activate", self._stop_typing)
+        focus = Gtk.EventControllerFocus()
+        focus.connect("leave", self._stop_typing)
+        self.spin.add_controller(focus)
+
+    def _value_changed(self, *_):
+        self._typing = False        # the spin parsed it (Enter, focus-out, +/-)
+        self.commit_later(self.pending_value)
 
     def pending_value(self):
         return int(round(self.adj.get_value() * self.factor))
@@ -302,7 +316,19 @@ class NumberControl(Control):
             self.adj.set_value(round(v))
 
     def editing(self):
-        return self.spin.has_focus() or bool(self.spin.get_focus_child())
+        # Only while digits are being typed: focus parked on the spin's +/-
+        # buttons after a click must not freeze the row against outside updates.
+        return self._typing
+
+    def _on_text_changed(self, *_):
+        if not self._syncing and self.spin.get_text() != self._formatted():
+            self._typing = True
+
+    def _formatted(self) -> str:
+        return str(int(round(self.adj.get_value())))
+
+    def _stop_typing(self, *_):
+        self._typing = False
 
 
 class EntryControl(Control):
@@ -620,6 +646,12 @@ class SettingsPage(Adw.PreferencesPage):
 
     # ── live updates ──
     def sync_all(self) -> None:
+        ticker = self.controls.get("bar.ticker")
+        if ticker is not None:
+            secs = self.value("bar.ticker_seconds")
+            ticker.hint = (f"Replaces the numbers with one reading every {secs} s. "
+                           "Alerts pin themselves.")
+            ticker._paint_subtitle()
         for key, control in self.controls.items():
             try:
                 control.sync(self.value(key), self.overridden_by(key))
@@ -668,7 +700,7 @@ class SettingsPage(Adw.PreferencesPage):
         dialog = Adw.AlertDialog(
             heading="Add the palette shortcut?",
             body=(f"smartPanel adds a GNOME custom shortcut, {label}, that runs "
-                  f"“{shortcut.PALETTE_COMMAND}”. You can change or remove it in "
+                  f"“smartpanel --palette”. You can change or remove it in "
                   "GNOME Settings → Keyboard → Custom Shortcuts."))
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("add", "Add shortcut")

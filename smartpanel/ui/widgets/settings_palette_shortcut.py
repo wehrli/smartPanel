@@ -1,7 +1,8 @@
 """GNOME custom keybinding for the command palette (SP-2204).
 
 Apps can't grab global keys on Wayland, so the palette shortcut is a GNOME *custom
-shortcut* that runs `smartpanel --palette`. Settings → Desktop offers **Add shortcut**,
+shortcut* that runs `smartpanel --palette`
+(as an absolute command, see `palette_command`). Settings → Desktop offers **Add shortcut**,
 which (after asking) writes one here:
 
     org.gnome.settings-daemon.plugins.media-keys  custom-keybindings = [..., <path>]
@@ -17,6 +18,10 @@ GTK-free; Gio is imported lazily.
 from __future__ import annotations
 
 import logging
+import os
+import shlex
+import shutil
+import sys
 from typing import Protocol
 
 log = logging.getLogger(__name__)
@@ -24,8 +29,35 @@ log = logging.getLogger(__name__)
 MEDIA_KEYS_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
 CUSTOM_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding"
 BASE_PATH = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
-PALETTE_COMMAND = "smartpanel --palette"
+PALETTE_ARG = "--palette"
 PALETTE_NAME = "smartPanel command palette"
+
+
+def palette_command(*, which=shutil.which, python: str | None = None,
+                    package_dir: str | None = None) -> str:
+    """The command the keybinding runs, as an absolute path that works from GNOME.
+
+    The supported install (scripts/install.sh + the systemd unit running
+    `python -m smartpanel` from the repo) puts no `smartpanel` on PATH, so a bare
+    `smartpanel --palette` would silently do nothing. Prefer a real console
+    script when one resolves; otherwise run this interpreter on this checkout.
+    """
+    exe = which("smartpanel")
+    if exe:
+        return f"{shlex.quote(os.path.abspath(exe))} {PALETTE_ARG}"
+    python = python or sys.executable
+    if package_dir is None:
+        package_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))))
+    return " ".join(shlex.quote(p) for p in (
+        "env", f"PYTHONPATH={package_dir}", os.path.abspath(python),
+        "-m", "smartpanel", PALETTE_ARG))
+
+
+def is_palette_command(command: str) -> bool:
+    """Ours, old (`smartpanel --palette`) or new (absolute / `python -m`) form."""
+    command = (command or "").strip()
+    return command.endswith(f" {PALETTE_ARG}") and "smartpanel" in command
 
 
 class Backend(Protocol):
@@ -105,14 +137,14 @@ class GioBackend:
         self._gio().Settings.sync()
 
 
-def find_existing(backend: Backend, command: str = PALETTE_COMMAND) -> dict | None:
-    """The custom shortcut already running `command`, as {path, name, command, binding}."""
+def find_existing(backend: Backend) -> dict | None:
+    """Our palette shortcut, if one exists, as {path, name, command, binding}."""
     try:
         if not backend.available():
             return None
         for path in backend.paths():
             entry = backend.read(path)
-            if (entry.get("command") or "").strip() == command:
+            if is_palette_command(entry.get("command") or ""):
                 return {"path": path, **entry}
     except Exception:  # noqa: BLE001 — reading dconf must never break Settings
         log.debug("reading custom keybindings failed", exc_info=True)
@@ -128,14 +160,18 @@ def free_path(paths: list[str]) -> str:
 
 
 def add_palette_shortcut(backend: Backend, binding: str, *,
-                         command: str = PALETTE_COMMAND, name: str = PALETTE_NAME) -> str:
+                         command: str | None = None, name: str = PALETTE_NAME) -> str:
     """Write (or update) the custom shortcut; returns its dconf path.
+
+    An existing palette shortcut (including the old bare `smartpanel --palette`
+    form) is rewritten in place with the current, absolute command.
 
     Raises RuntimeError when GNOME's media-keys schema isn't installed.
     """
     if not backend.available():
         raise RuntimeError("GNOME keyboard settings aren’t available on this desktop")
-    existing = find_existing(backend, command)
+    command = command or palette_command()
+    existing = find_existing(backend)
     if existing is not None:
         path = existing["path"]
     else:
