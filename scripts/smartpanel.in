@@ -1,0 +1,25 @@
+#!/bin/sh
+# Written by smartPanel's scripts/install.sh: run the app from its source tree.
+#
+# For the verbs that talk to a running instance (--dashboard, --palette, --hud) it
+# first pings dev.omdev.SmartPanel on the session bus. If the app isn't running, that
+# ping D-Bus-activates it through smartpanel.service, so it starts under systemd (its
+# own cgroup, journald logs) instead of as a child of this shell; the python call
+# below then just forwards the verb. Everything else (--demo, --snapshot,
+# --praise-report, --help) runs locally, untouched.
+REPO="@REPO@"
+PY="@PYTHON@"
+
+for arg in "$@"; do
+  case "$arg" in
+    --dashboard|--dashboard=*|--palette|--hud|--hud=*)
+      if [ -z "${SMARTPANEL_APP_ID:-}" ] && command -v gdbus >/dev/null 2>&1; then
+        timeout 15 gdbus call --session --dest dev.omdev.SmartPanel \
+          --object-path /dev/omdev/SmartPanel \
+          --method org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1 || true
+      fi
+      break ;;
+  esac
+done
+
+PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m smartpanel "$@"
