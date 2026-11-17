@@ -16,13 +16,14 @@ structure changes.
 
 Client notes (dbusMenu.js): it asks `GetLayout(0, -1, ['type','children-display'])`
 then `GetGroupProperties(ids, [])` (empty list = all properties); labels go through
-`label.replace(/_([^_])/, '$1')`, so a literal underscore must be sent doubled
-(`escape_label`); `toggle-type: 'checkmark'` + `toggle-state: 1` draws the check;
+`label.replace(/_([^_])/, '$1')` (non-global), so the first underscore is sent
+doubled (`escape_label`); `toggle-type: 'checkmark'` + `toggle-state: 1` draws the check;
 clicks arrive as `Event(id, 'clicked', <i 0>, timestamp)`.
 """
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
@@ -56,9 +57,20 @@ PROP_DEFAULTS: dict[str, Any] = {
 STRUCTURAL = ("type", "children-display")
 
 
+_UNESCAPED_MNEMONIC = re.compile(r"_[^_]")
+
+
 def escape_label(text: str) -> str:
-    """Underscores are mnemonics in dbusmenu labels; '__' is a literal '_'."""
-    return text.replace("_", "__")
+    """Escape a label for the GNOME extension's *non-global* mnemonic strip.
+
+    dbusMenu.js runs `label.replace(/_([^_])/, '$1')` once, so only the first
+    `_x` loses its underscore. Doubling the first underscore (and only when that
+    regex would match at all) makes the round trip exact: 'fix_foo_bar' arrives
+    as 'fix__foo_bar' and is shown as 'fix_foo_bar'.
+    """
+    if not _UNESCAPED_MNEMONIC.search(text):
+        return text
+    return text.replace("_", "__", 1)
 
 
 @dataclass

@@ -99,9 +99,8 @@ def truncate(text: str, n: int = TITLE_MAX) -> str:
 
 
 def _setting(state: PanelState, config: Any, key: str, default: Any) -> Any:
-    vals = state.settings.values or {}
-    if key in vals and vals[key] is not None:
-        return vals[key]
+    """Same order as the bar (`tray._ConfigView`): the Config first, then the
+    settings mirrored into the store, so the menu never disagrees with the bar."""
     if config is not None and hasattr(config, "get"):
         try:
             v = config.get(key)
@@ -109,6 +108,9 @@ def _setting(state: PanelState, config: Any, key: str, default: Any) -> Any:
             v = None
         if v is not None:
             return v
+    vals = state.settings.values or {}
+    if key in vals and vals[key] is not None:
+        return vals[key]
     return default
 
 

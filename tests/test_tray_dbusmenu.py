@@ -75,8 +75,22 @@ def test_updated_variant_signature():
     assert v.get_type_string() == "(a(ia{sv})a(ias))"
 
 
+def _gnome_unescape(label: str) -> str:
+    """dbusMenu.js:742 - `label.replace(/_([^_])/, '$1')`, non-global."""
+    import re
+    return re.sub(r"_([^_])", r"\1", label, count=1)
+
+
 def test_escape_label():
     assert dbusmenu.escape_label("a_b") == "a__b"
+    assert dbusmenu.escape_label("fix_foo_bar") == "fix__foo_bar"
+    assert dbusmenu.escape_label("plain") == "plain"
+
+
+@pytest.mark.parametrize("text", ["fix_foo_bar", "a_b", "_x", "a__b", "a_", "a__",
+                                  "snake_case_name_here", "x _ y", "no underscores", "__init__"])
+def test_escape_label_round_trips_through_gnome_unescape(text):
+    assert _gnome_unescape(dbusmenu.escape_label(text)) == text
 
 
 # ── the real menu across state changes (SP-2002) ──

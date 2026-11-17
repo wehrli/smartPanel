@@ -185,6 +185,14 @@ def test_ticker_setting_from_state_settings():
     assert rows(st)["act.pin"].visible
 
 
+def test_config_wins_over_state_mirror_like_the_bar():
+    """Same lookup order as tray._ConfigView, so the menu never contradicts the bar."""
+    st = fx.busy()
+    st.settings.values = {"bar.ticker": True, "hud.enabled": False}
+    r = rows(st, {"bar.ticker": False, "hud.enabled": True})
+    assert not r["act.pin"].visible and r["act.hud"].toggle is True
+
+
 def test_hud_checkmark():
     r = rows(fx.busy())
     assert r["act.hud"].toggle is False and r["act.hud"].action == ("hud", True)
