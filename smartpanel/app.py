@@ -30,6 +30,7 @@ from gi.repository import Adw, Gio, GLib  # noqa: E402
 
 from smartpanel import __version__, cli  # noqa: E402
 from smartpanel.state import Event, Store  # noqa: E402
+from smartpanel.state.model import SECTIONS  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +65,19 @@ class ActionsProxy:
             log.info("action %s ignored: still starting", name)
             return [] if name == "list_start_folders" else None
         return _not_ready
+
+
+def _own_method(obj, name: str):
+    """`obj.name` only if the class really defines it — not something a
+    catch-all `__getattr__` (stub controllers, ActionsProxy) makes up."""
+    if obj is None:
+        return None
+    try:
+        inspect.getattr_static(obj, name)
+    except AttributeError:
+        return None
+    fn = getattr(obj, name, None)
+    return fn if callable(fn) else None
 
 
 def _accepts_kwarg(cls, name: str) -> bool:
@@ -139,7 +153,9 @@ class SmartPanelApp(Adw.Application):
         except cli.CliError as e:
             command_line.printerr_literal(f"{e}\n")
             return 2
-        if ns.verbose or ns.debug:
+        # Only the invocation that starts the service sets its verbosity; a
+        # forwarded `smartpanel -v --palette` must not change the daemon's log level.
+        if (ns.verbose or ns.debug) and not remote and not self._wired:
             logging.getLogger().setLevel(cli.log_level(ns))
 
         if not self._wired:
@@ -147,7 +163,13 @@ class SmartPanelApp(Adw.Application):
                 self._wire(ns)
             except cli.CliError as e:
                 command_line.printerr_literal(f"{e}\n")
+                self._abort_start()
                 return 2
+            except Exception as e:  # noqa: BLE001 — SP-0011: a failed start is rc 1
+                log.exception("startup failed")
+                command_line.printerr_literal(f"smartpanel: failed to start: {e}\n")
+                self._abort_start()
+                return 1
             if not self._held:
                 self.hold()
                 self._held = True
@@ -169,8 +191,8 @@ class SmartPanelApp(Adw.Application):
             except Exception:  # noqa: BLE001
                 pass
         for svc in [self.tray, *reversed(self._services)]:
-            stop = getattr(svc, "stop", None)
-            if callable(stop):
+            stop = _own_method(svc, "stop")
+            if stop is not None:
                 try:
                     stop()
                 except Exception:  # noqa: BLE001
@@ -181,6 +203,26 @@ class SmartPanelApp(Adw.Application):
         Adw.Application.do_shutdown(self)
 
     # ───────────────────────── wiring ─────────────────────────
+
+    def _abort_start(self) -> None:
+        """Undo a half-done `_wire` so the process exits instead of idling
+        un-wired (and so nothing is subscribed twice)."""
+        for unsub in self._unsubs:
+            try:
+                unsub()
+            except Exception:  # noqa: BLE001
+                pass
+        self._unsubs.clear()
+        for svc in reversed(self._services):
+            stop = _own_method(svc, "stop")
+            if stop is not None:
+                try:
+                    stop()
+                except Exception:  # noqa: BLE001
+                    log.exception("stopping %r failed", svc)
+        self._services.clear()
+        if not self._held:
+            self.quit()
 
     def _wire(self, ns: argparse.Namespace) -> None:
         from smartpanel.config import Config
@@ -200,7 +242,11 @@ class SmartPanelApp(Adw.Application):
             if not state.app.version:
                 state.app.version = __version__
             self.store.state = state
-            self.store.touch("app")
+            # The whole state was replaced: every section changed (D-Bus
+            # Changed(sections) listeners exported earlier must hear all of them).
+            with self.store.batch():
+                for section in SECTIONS:
+                    self.store.touch(section)
         else:
             self.store.update("app", version=__version__)
         # After the demo state swap (so the settings section it fills survives)
@@ -221,8 +267,8 @@ class SmartPanelApp(Adw.Application):
             started = [collector, spend, controller]
         self._services += started
         for svc in started:
-            start = getattr(svc, "start", None)
-            if not callable(start):
+            start = _own_method(svc, "start")
+            if start is None:
                 continue
             try:
                 start()
@@ -294,8 +340,10 @@ class SmartPanelApp(Adw.Application):
         from smartpanel.ui import shellmodel
         model = shellmodel.toast_model(data)
         if model is not None:
-            notify.send("smartPanel", model.text,
-                        urgency="critical" if model.error else "normal",
+            # Always "normal": GNOME pins "critical" bubbles until dismissed, and a
+            # routine error toast must not become a sticky banner. (The swap
+            # alert, which owns critical urgency, goes through collect/system.py.)
+            notify.send("smartPanel", model.text, urgency="normal",
                         key="smartpanel-toast")
 
     def _open_session_dialog(self, kind: str, data: dict) -> None:

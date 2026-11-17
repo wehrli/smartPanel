@@ -96,6 +96,21 @@ def test_main_rejects_bad_args_with_status_2(capsys):
     assert cli.main(["--theme", "no-such-theme"]) == 2
 
 
+def test_demo_gallery_is_the_gallery():
+    ns = cli.parse_args(["--demo", "gallery"])
+    assert ns.gallery and ns.demo is None
+
+
+def test_garbled_theme_is_a_usage_error(tmp_path, capsys):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("STATS: {CPU: [unclosed\n  - : :\n")
+    with pytest.raises(cli.CliError):
+        cli.check_theme(str(bad))
+    assert cli.main(["--theme", str(bad)]) == 2
+    assert "bad theme" in capsys.readouterr().err
+    assert cli.check_theme("default").name == "default.yaml"
+
+
 def test_main_help(capsys):
     assert cli.main(["--help"]) == 0
     out = capsys.readouterr().out

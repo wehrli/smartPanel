@@ -325,6 +325,58 @@ def test_session_dialogs_build(shell):
     d.force_close()
 
 
+def test_new_session_single_click_only_selects(shell):
+    """A click on a folder selects it; it must never launch a session."""
+    from smartpanel.ui import session_dialogs as sd
+    win, store, _, _ = shell
+
+    class FolderActions(RecordingActions):
+        def list_start_folders(self):
+            return [{"name": "a", "path": "/tmp/a"}, {"name": "b", "path": "/tmp/b"}]
+    actions = FolderActions()
+    d = sd.new_session(win, store, actions, FakeConfig())
+    flow = _find_widget(d.get_extra_child(), Gtk.FlowBox)
+    assert flow is not None and not flow.get_activate_on_single_click()
+    flow.select_child(flow.get_child_at_index(0))
+    _drain()
+    assert d.get_response_enabled("open")
+    assert not [c for c in actions.calls if c[0] == "new_session"]
+    d.emit("response", "open")
+    assert ("new_session", ("/tmp/a",)) in actions.calls
+    d.force_close()
+
+
+def _find_widget(root, cls):
+    if isinstance(root, cls):
+        return root
+    child = root.get_first_child() if root is not None else None
+    while child is not None:
+        found = _find_widget(child, cls)
+        if found is not None:
+            return found
+        child = child.get_next_sibling()
+    return None
+
+
+def test_journal_confirm_closes_even_if_close_raises(shell):
+    from smartpanel.ui import session_dialogs as sd
+    win, store, _, _ = shell
+    store.update("sessions", items=[Session("claude-a", project="a", created=time.time() - 999)])
+
+    class Exploding(RecordingActions):
+        def close_session(self, *_a):
+            raise RuntimeError("tmux vanished")
+    closed = []
+    d = sd.confirm_close(win, store, Exploding(), FakeConfig(**{"sessions.confirm_seconds": 1}),
+                         "claude-a")
+    d.connect("closed", lambda *_: closed.append(True))
+    deadline = time.monotonic() + 3
+    while not closed and time.monotonic() < deadline:
+        GLib.MainContext.default().iteration(False)
+        time.sleep(0.01)
+    assert closed
+
+
 def test_journal_confirm_autoconfirms(shell):
     from smartpanel.ui import session_dialogs as sd
     win, store, actions, _ = shell
@@ -370,15 +422,38 @@ def test_app_routes_events_without_a_window(monkeypatch):
     app._on_event(Event("toast", {"text": "Journal written", "error": False}))
     assert sent and sent[0][0][1] == "Journal written"
     assert sent[0][1]["urgency"] == "normal"
+    # Error toasts too: "critical" would pin a routine error on screen.
+    app._on_event(Event("toast", {"text": "Install tmux first", "error": True}))
+    assert sent[-1][0][1] == "Install tmux first"
+    assert sent[-1][1]["urgency"] == "normal"
 
 
 def test_demo_wiring(monkeypatch, tmp_path):
-    from smartpanel import cli
+    from smartpanel import cli, notify
     from smartpanel.app import SmartPanelApp
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda *a, **k: sent.append((a, k)) or True)
     app = SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
-    app._wire(cli.parse_args(["--demo", "busy"]))
+    changed = []
+    app.store.subscribe(lambda sections: changed.append(set(sections)))
+    try:
+        app._wire(cli.parse_args(["--demo", "busy"]))
+        _check_demo_wiring(app, changed, monkeypatch)
+    finally:
+        for svc in app._services:
+            stop = type(svc).__dict__.get("stop")
+            if stop is not None:
+                stop(svc)
+        app._services.clear()
+
+
+def _check_demo_wiring(app, changed, monkeypatch):
+    from smartpanel import cli
+    from smartpanel.state.model import SECTIONS
+    # The demo state replaced everything: every section is reported changed.
+    assert set().union(*changed) >= set(SECTIONS)
     assert app.store.state.app.demo == "busy"
     assert app.store.state.app.version
     assert app.actions.target is not None
@@ -391,3 +466,44 @@ def test_demo_wiring(monkeypatch, tmp_path):
     assert seen == [("dash", "journal:x"), ("palette",)]
     app._run_request(cli.Request("dashboard", "spend"))
     assert seen[-1] == ("dash", "spend")
+
+
+def test_stub_getattr_is_not_a_start_method():
+    from smartpanel.app import ActionsProxy, _own_method
+
+    class Real:
+        def start(self):
+            return "started"
+    assert _own_method(Real(), "start")() == "started"
+    assert _own_method(RecordingActions(), "start") is None   # catch-all __getattr__
+    assert _own_method(ActionsProxy(), "stop") is None
+    assert _own_method(None, "stop") is None
+
+
+def test_failed_start_exits_nonzero(monkeypatch, tmp_path):
+    """SP-0011: a start that blows up in wiring returns 1 and says why."""
+    from smartpanel import app as app_mod
+
+    class FakeCommandLine:
+        def __init__(self, argv):
+            self.argv, self.err = argv, []
+
+        def get_arguments(self):
+            return ["smartpanel", *self.argv]
+
+        def get_is_remote(self):
+            return False
+
+        def printerr_literal(self, text):
+            self.err.append(text)
+
+    a = app_mod.SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
+
+    def boom(_ns):
+        raise ValueError("theme is garbled")
+    monkeypatch.setattr(a, "_wire", boom)
+    monkeypatch.setattr(a, "quit", lambda: None)
+    cl = FakeCommandLine(["--demo", "busy"])
+    assert a.do_command_line(cl) == 1
+    assert "failed to start: theme is garbled" in "".join(cl.err)
+    assert not a._wired and not a._held

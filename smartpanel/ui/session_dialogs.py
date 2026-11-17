@@ -75,17 +75,22 @@ def confirm_close(window, store, actions, config, name: str):
         if state["timer"]:
             GLib.source_remove(state["timer"])
             state["timer"] = 0
-        if response == "journal":
-            actions.close_session(name, True)
-        elif response == "without":
-            actions.close_session(name, False)
+        try:
+            if response == "journal":
+                actions.close_session(name, True)
+            elif response == "without":
+                actions.close_session(name, False)
+        except Exception:  # noqa: BLE001 — never strand the dialog open
+            log.exception("close_session(%s) failed", name)
 
     def tick():
         state["left"] -= 1
         if state["left"] <= 0:
             state["timer"] = 0
-            finish("journal")
-            dialog.force_close()
+            try:
+                finish("journal")
+            finally:
+                dialog.force_close()
             return GLib.SOURCE_REMOVE
         dialog.set_response_label("journal", journal_button_label(state["left"]))
         return GLib.SOURCE_CONTINUE
@@ -140,7 +145,9 @@ def new_session(window, store, actions, config):
     box.append(crumbs)
     flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.SINGLE, max_children_per_line=2,
                        min_children_per_line=2, homogeneous=True, column_spacing=3,
-                       row_spacing=3)
+                       row_spacing=3, activate_on_single_click=False)
+    # A click only selects; launching takes Open, a double-click or Enter. A
+    # mis-click must never spawn a terminal running Claude.
     paths: dict[Gtk.FlowBoxChild, str] = {}
     for f in folders:
         row = Gtk.Box(spacing=8)

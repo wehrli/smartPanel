@@ -185,8 +185,12 @@ def snapshot(target: str, out: str | Path, *, state=None, demo: str | None = Non
     store = Store(state)
     config = Config()
     if demo:
+        from smartpanel.app import _accepts_kwarg
         from smartpanel.demo import DemoController
-        actions = DemoController(store, config)
+        # Deterministic captures: no jitter timers, no scenario ticks, no bubbles.
+        kwargs = {k: False for k in ("autostart", "live")
+                  if _accepts_kwarg(DemoController, k)}
+        actions = DemoController(store, config, **kwargs)
     else:
         actions = _InertActions()
 

@@ -63,6 +63,11 @@ class PaletteWindow(Adw.Window):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key)
         self.add_controller(keys)
+        self.connect("notify::is-active", self._on_active)
+
+    def _on_active(self, *_):
+        if self.get_visible() and not self.is_active():
+            self.close()
 
     def present(self):  # noqa: D401 — Gtk API
         self.entry.set_text("")

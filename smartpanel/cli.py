@@ -8,7 +8,7 @@
     smartpanel --theme NAME|PATH    metric theme (preset name or .yaml path)
     smartpanel --praise-report      print the gratification report (no GTK, works over SSH)
     smartpanel --snapshot PAGE --out FILE.png [--demo busy]   render a page to PNG
-    smartpanel --gallery [--demo busy]                        widget kit gallery
+    smartpanel --gallery  (or --demo gallery)                 widget kit gallery
 
 Single instance comes from Gio.Application (`HANDLES_COMMAND_LINE`): a second
 invocation forwards its arguments to the running instance and exits with that
@@ -30,6 +30,7 @@ log = logging.getLogger("smartpanel")
 SCENARIOS = ("busy", "calm", "alert", "empty", "many", "cold", "first", "notmux", "noswap")
 HUD_CHOICES = ("on", "off", "toggle")
 SNAPSHOT_TARGETS = ("window", "gallery")   # plus every page / page:detail
+GALLERY = "gallery"   # `--demo gallery` = `--gallery` (SP-0009's wording)
 
 
 class CliError(Exception):
@@ -65,8 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
     verbs.add_argument("--palette", action="store_true", help="Open the command palette")
     verbs.add_argument("--hud", choices=HUD_CHOICES, help="Show, hide or toggle the desktop HUD")
     start = p.add_argument_group("startup (first instance only)")
-    start.add_argument("--demo", choices=_scenarios(), metavar="SCENARIO",
-                       help="Run on simulated data: " + ", ".join(_scenarios()))
+    start.add_argument("--demo", choices=(*_scenarios(), GALLERY), metavar="SCENARIO",
+                       help="Run on simulated data: " + ", ".join(_scenarios())
+                            + f" ('{GALLERY}' opens the widget gallery)")
     start.add_argument("--theme", default=None, metavar="NAME|PATH",
                        help="Theme preset name or path to a .yaml file (default: default)")
     tools = p.add_argument_group("one-shot tools (no running instance needed)")
@@ -95,6 +97,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ns = build_parser().parse_args(argv)
     if ns.help:
         return ns
+    if ns.demo == GALLERY:
+        ns.demo = None
+        ns.gallery = True
     if ns.snapshot is not None and not ns.out:
         raise CliError("smartpanel: error: --snapshot needs --out FILE.png")
     if ns.out and ns.snapshot is None:
@@ -169,6 +174,18 @@ def resolve_theme(value: str | None) -> Path:
     raise CliError(f"smartpanel: theme not found: {value}")
 
 
+def check_theme(value: str | None) -> Path:
+    """Resolve *and parse* the theme, so a malformed file is a usage error
+    (exit 2) in the invoking process rather than a crash inside the service."""
+    path = resolve_theme(value)
+    try:
+        from smartpanel.theme.loader import load_theme
+        load_theme(path)
+    except Exception as e:  # noqa: BLE001 — any parse/shape error is the user's file
+        raise CliError(f"smartpanel: bad theme {str(path)!r}: {e}") from e
+    return path
+
+
 # ───────────────────────── entry point ─────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
@@ -176,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         ns = parse_args(argv)
         if ns.theme:
-            resolve_theme(ns.theme)
+            check_theme(ns.theme)
     except CliError as e:
         msg = str(e)
         if msg:
