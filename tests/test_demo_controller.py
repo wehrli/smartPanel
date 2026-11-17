@@ -86,7 +86,7 @@ def test_request_close_young_session_closes_at_once():
     rec.clear()
     ctl.request_close("claude-wishlist")
     assert find(store, "claude-wishlist") is None
-    assert rec.last_toast()["text"] == "Closed “wishlist”. Open under 2m, so no journal."
+    assert rec.last_toast()["text"] == "Closed “wishlist”. Open under 2 min, so no journal."
     assert rec.of("confirm_close") == []
 
 
@@ -103,7 +103,7 @@ def test_min_age_comes_from_config():
     store, ctl, sched, rec = demo_controller(config=cfg)
     ctl.request_close(LEDGERLY)           # 190 min < 4 h
     assert find(store, LEDGERLY) is None
-    assert "Open under 4h00" in rec.last_toast()["text"]
+    assert "Open under 4 h," in rec.last_toast()["text"]
 
 
 def test_close_without_journal():
@@ -459,3 +459,49 @@ def test_works_without_config():
     assert rec.of("confirm_close")
     ctl.set_setting("swap.warn", 1)
     assert rec.last_toast()["error"]
+
+
+# ── review fixes ──
+
+@pytest.mark.parametrize("min_age, words", [(120, "2 min"), (30, "30 s"), (90, "90 s"),
+                                            (4 * 3600, "4 h")])
+def test_short_session_toast_words_the_threshold(min_age, words):
+    cfg = Config({"sessions.min_age_s": min_age})
+    store, ctl, sched, rec = demo_controller(config=cfg)
+    ctl.new_session("~/dev/omdev/wishlist")
+    sched.advance(LAUNCH_MS)
+    ctl.request_close("claude-wishlist")
+    assert rec.last_toast()["text"] == f"Closed “wishlist”. Open under {words}, so no journal."
+
+
+@pytest.mark.parametrize("option", ["x", None, "1.5"])
+def test_answer_prompt_with_garbage_option_toasts(option):
+    store, ctl, sched, rec = demo_controller()
+    ctl.answer_prompt(SMART, option, "")
+    assert rec.last_toast()["error"]
+    assert find(store, SMART).activity == WAITING
+
+
+def test_demo_never_writes_the_config_file(tmp_path):
+    path = tmp_path / "smartpanel" / "config.yaml"
+    cfg = Config.load(path, env={})
+    store, ctl, sched, rec = demo_controller(config=cfg)
+    ctl.set_hud(True)
+    ctl.set_setting("swap.warn", 50)
+    assert cfg.get("swap.warn") == 50
+    assert not path.exists() and not any(tmp_path.rglob("*"))
+    cfg2 = Config.load(path, env={})
+    store, ctl, *_ = demo_controller(config=cfg2, persist=True)
+    ctl.set_setting("swap.warn", 55)
+    assert path.exists()
+
+
+def test_each_demo_notification_has_its_own_key(monkeypatch):
+    from smartpanel import notify
+    keys = []
+    monkeypatch.setattr(notify, "send", lambda *a, **kw: keys.append(kw.get("key")))
+    store, ctl, *_ = demo_controller()
+    ctl._notifier = None
+    ctl._notify("a", "b", "info")
+    ctl._notify("c", "d", "info")
+    assert len(set(keys)) == 2

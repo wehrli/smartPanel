@@ -274,6 +274,7 @@ def test_fixtures_match_build_state(name, utc):
     if os.environ.get("SMARTPANEL_REGEN_FIXTURES") == "1":
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(dump_fixture(state), encoding="utf-8")
+    state.app.version = ""          # fixtures don't pin the version (see dump_fixture)
     assert load_fixture(name) == state
 
 

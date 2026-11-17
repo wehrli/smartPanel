@@ -29,7 +29,8 @@ def test_missing_file_gives_defaults(path):
     assert not path.exists()  # loading never writes
 
 
-def test_bare_config_ignores_process_env(monkeypatch):
+def test_bare_config_ignores_process_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))   # never read the host's file
     monkeypatch.setenv("SMARTPANEL_SWAP_WARN", "70")
     assert Config().get("swap.warn") == 60
     assert Config.load(path=None, env=None).overridden_by("swap.warn") == "SMARTPANEL_SWAP_WARN"

@@ -205,7 +205,7 @@ journal:
   entries: []
   monthly_log_path: ~/dev/omdev/JOURNAL/2026-11.md
 app:
-  version: 0.1.0
+  version: ''
   loading: null
   first_run: true
   demo: first

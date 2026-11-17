@@ -178,4 +178,8 @@ def load_fixture(name: str) -> PanelState:
 
 
 def dump_fixture(state: PanelState) -> str:
-    return yaml.safe_dump(to_dict(state), sort_keys=False, allow_unicode=True, width=100)
+    """YAML snapshot of `state`. app.version is blanked so a version bump never
+    invalidates the fixtures."""
+    data = to_dict(state)
+    data["app"]["version"] = ""
+    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=100)

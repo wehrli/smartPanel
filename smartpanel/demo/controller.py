@@ -17,6 +17,7 @@ Failure switches, as in the prototype's control panel (also readable from env):
 """
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import random
@@ -82,6 +83,16 @@ def _fmt_age(minutes: float) -> str:
     return f"{m // 60}h{m % 60:02d}"
 
 
+def _fmt_threshold(seconds: float) -> str:
+    """A minimum age as the prototype words it: "2 min", "30 s", "4 h", "90 s"."""
+    s = int(round(seconds))
+    if s >= 3600 and s % 3600 == 0:
+        return f"{s // 3600} h"
+    if s >= 60 and s % 60 == 0:
+        return f"{s // 60} min"
+    return f"{s} s"
+
+
 def _tilde(path: str) -> str:
     home = os.path.expanduser("~")
     return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
@@ -91,13 +102,17 @@ class DemoController:
     def __init__(self, store, config, *, scheduler=None, clock: Callable[[], float] | None = None,
                  env: Mapping[str, str] | None = None,
                  notifier: Callable[[str, str, str], None] | None = None,
-                 autostart: bool = True, live: bool = True, seed: int = 17):
+                 autostart: bool = True, live: bool = True, seed: int = 17,
+                 persist: bool = False):
         """`store` holds a demo state (see `build_state`); `config` a `Config`.
 
         `notifier(title, body, kind)` shows the prototype's desktop notifications; the
         default is `smartpanel.notify.send`. Tests pass a recorder. `live` jitters CPU,
         memory and network every 3 s like the prototype; `autostart` starts that (and the
         cold scenario's loading animation) immediately.
+
+        Unless `persist=True`, the config is detached from its file (`config.path = None`)
+        so toggling settings in `--demo` never rewrites the user's real config.yaml.
         """
         self.store, self.config = store, config
         self.scheduler = scheduler or GLibScheduler()
@@ -110,6 +125,7 @@ class DemoController:
         self._notifier = notifier
         self._live = live
         self._rng = random.Random(seed)
+        self._note_ids = itertools.count(1)
         self._timers: set[int] = set()
         self._journaling: set[str] = set()
         self._started = False
@@ -120,6 +136,8 @@ class DemoController:
             self._budget = sc.DEMO_BUDGET
 
         if config is not None:
+            if not persist and hasattr(config, "path"):
+                config.path = None
             if hasattr(config, "bind_store"):
                 self._unsub.append(config.bind_store(store))
             self._unsub.append(config.subscribe(self._on_setting))
@@ -203,7 +221,7 @@ class DemoController:
             else:
                 from smartpanel import notify
                 notify.send(title, body, urgency="critical" if kind == "crit" else "normal",
-                            key="smartpanel-demo")
+                            key=f"smartpanel-demo-{next(self._note_ids)}")
         except Exception:
             log.exception("demo notification failed")
 
@@ -264,7 +282,7 @@ class DemoController:
         title = s.display_title
         self._remove(name)
         if journal_on:
-            self.store.toast(f"Closed “{title}”. Open under {_fmt_age(min_age / 60)}, "
+            self.store.toast(f"Closed “{title}”. Open under {_fmt_threshold(min_age)}, "
                              "so no journal.")
         else:
             self.store.toast(f"Closed “{title}”.")
@@ -459,18 +477,23 @@ class DemoController:
             self.store.toast(f"The question in “{title}” changed. Nothing was sent.",
                              error=True)
             return
-        if not 0 <= int(option) < len(p.options):
-            self.store.toast(f"“{title}” has no option {int(option) + 1}", error=True)
+        try:
+            idx = int(option)
+        except (TypeError, ValueError):
+            self.store.toast(f"“{title}” has no option {option!r}", error=True)
+            return
+        if not 0 <= idx < len(p.options):
+            self.store.toast(f"“{title}” has no option {idx + 1}", error=True)
             return
         # The last of three+ options is "No, tell Claude what to do differently": back to you.
-        to_idle = len(p.options) >= 3 and option == len(p.options) - 1
+        to_idle = len(p.options) >= 3 and idx == len(p.options) - 1
 
         def up(_i) -> None:
             s.prompt, s.waiting_since = None, None
             s.activity = IDLE if to_idle else RUNNING
             s.doing = None if to_idle else APPLYING
         self._sessions_changed(up)
-        self.store.toast(f"Sent “{int(option) + 1}” to {title}")
+        self.store.toast(f"Sent “{idx + 1}” to {title}")
         if not to_idle:
             def settle() -> None:
                 cur = self._find(name)
