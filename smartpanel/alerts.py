@@ -99,6 +99,37 @@ def thresholds_from_env(env: dict[str, str] | None = None) -> Thresholds:
     )
 
 
+def make_thresholds(warning, critical, hysteresis=5.0, repeat_s=600.0) -> Thresholds:
+    """Thresholds from loosely-typed settings values (config file / Settings UI).
+
+    Same guarantees as `thresholds_from_env`: never raises (a non-number keeps
+    the default), a negative hysteresis/repeat is floored at 0, and a critical
+    below warning is clamped up to it rather than honoured.
+    """
+    d = Thresholds()
+
+    def num(name: str, raw, default: float) -> float:
+        if raw is None or raw == "" or isinstance(raw, bool):
+            return default
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            log.warning("swap.%s=%r is not a number — using %g", name, raw, default)
+            return default
+
+    w = num("warn", warning, d.warning)
+    c = num("crit", critical, d.critical)
+    if c < w:
+        log.warning("swap.crit (%g) is below swap.warn (%g) — raising it to match", c, w)
+        c = w
+    return Thresholds(
+        warning=w,
+        critical=c,
+        hysteresis=max(0.0, num("hysteresis", hysteresis, d.hysteresis)),
+        repeat_s=max(0.0, num("repeat_s", repeat_s, d.repeat_s)),
+    )
+
+
 def raw_level(percent: float | None, t: Thresholds) -> Level:
     """Severity for a reading, ignoring history. `None` (no swap) is always OK."""
     if percent is None:
@@ -212,6 +243,30 @@ class AlertTracker:
     @property
     def active(self) -> bool:
         return self.level is not Level.OK
+
+    @property
+    def alerted(self) -> bool:
+        """True between an alert notification and its recovery (or a quiet reset)."""
+        return self._last_notified_at is not None
+
+    def reconfigure(self, thresholds: Thresholds) -> Level:
+        """Swap in new thresholds live (Settings), without a notification.
+
+        The current level is kept unless the new thresholds *lower* it past the
+        hysteresis band (e.g. warn raised well above the current reading); that
+        drop is applied here, silently, so the next `update()` can't turn it into
+        a "back to normal" bubble the user didn't need. A level the new
+        thresholds would *raise* is left for the next reading, which notifies
+        as any escalation does. The critical repeat clock is not reset.
+        Returns the (possibly lowered) level.
+        """
+        self.thresholds = thresholds
+        target = next_level(self.percent, self.level, thresholds)
+        if target < self.level:
+            self.level = target
+            if target is Level.OK:
+                self._last_notified_at = None   # nothing left to recover from
+        return self.level
 
     def update(self, percent: float | None, used_gib: float | None = None,
                total_gib: float | None = None, now: float = 0.0) -> AlertEvent | None:
