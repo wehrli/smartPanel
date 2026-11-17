@@ -29,7 +29,19 @@ platform (E00, E19 to E27) because they're shared by every piece of information.
 Task IDs are `SP-EENN`, where `EE` is the epic number. Sizes: **S** is under half a day,
 **M** is 1 to 2 days, **L** is 3 days or more. "Depends on" lists hard blockers only.
 
-## Decisions that block everything else
+## Decisions taken (2026-11-17)
+
+See `docs/architecture/v2.md` for the details.
+
+- **D1: fully GTK4.** We drop libayatana-appindicator and speak StatusNotifierItem and
+  DBusMenu ourselves over Gio, so the whole app is one GTK4/libadwaita process.
+- **D2: coloured bar graphics without an extension.** The Ubuntu AppIndicator extension
+  keeps a wide icon's aspect ratio when the icon is a PNG file path ≥ 1.5× wider than tall,
+  so the strip and graphs are drawn with cairo into such a file.
+- **D3: the HUD is a separate GNOME Shell extension** (`smartpanel-hud@omdev.dev`) reading
+  our D-Bus API.
+
+## Decisions that block everything else (original questions)
 
 These are SPIKE tasks in [E00](E00-foundation.md). Do them first, since the answers change
 how most FE tasks are built.

@@ -1,0 +1,38 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<!-- Bus name: dev.omdev.SmartPanel   Object path: /dev/omdev/SmartPanel -->
+<node>
+  <interface name="dev.omdev.SmartPanel1">
+    <!-- Full state as JSON (smartpanel.state.store.Store.to_json). Versioned by Version. -->
+    <method name="GetState">
+      <arg type="as" name="sections" direction="in"/>   <!-- empty = all -->
+      <arg type="s" name="json" direction="out"/>
+    </method>
+    <property name="Version" type="u" access="read"/>  <!-- schema version, bump on breaking change -->
+
+    <!-- Emitted (coalesced, at most every 250 ms) with the sections that changed. -->
+    <signal name="Changed"><arg type="as" name="sections"/></signal>
+    <!-- One-shot Event (state.model.Event) as kind + JSON data. -->
+    <signal name="Event"><arg type="s" name="kind"/><arg type="s" name="data"/></signal>
+
+    <!-- Actions (state.actions.Actions). All return immediately. -->
+    <method name="OpenDashboard"><arg type="s" name="page" direction="in"/></method>
+    <method name="OpenPalette"/>
+    <method name="SetHud"><arg type="b" name="enabled" direction="in"/></method>
+    <method name="PinTicker"><arg type="b" name="pinned" direction="in"/></method>
+    <method name="FocusSession"><arg type="s" name="name" direction="in"/></method>
+    <method name="RetitleSession"><arg type="s" name="name" direction="in"/></method>
+    <method name="RequestClose"><arg type="s" name="name" direction="in"/></method>
+    <method name="CloseSession"><arg type="s" name="name" direction="in"/><arg type="b" name="journal" direction="in"/></method>
+    <method name="RequestCloseAll"/>
+    <method name="CloseAll"/>
+    <method name="RequestNewSession"/>
+    <method name="NewSession"><arg type="s" name="directory" direction="in"/></method>
+    <method name="AnswerPrompt">
+      <arg type="s" name="name" direction="in"/>
+      <arg type="u" name="option" direction="in"/>
+      <arg type="s" name="fingerprint" direction="in"/>
+    </method>
+    <method name="SetSetting"><arg type="s" name="key" direction="in"/><arg type="s" name="json_value" direction="in"/></method>
+  </interface>
+</node>
