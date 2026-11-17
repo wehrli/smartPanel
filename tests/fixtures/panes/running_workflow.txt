@@ -1,0 +1,14 @@
+  Still to come:
+  - Wave 2: the window pages, wiring, and retiring the old GTK3 code.
+  - Final pass: merge everything and run the full test suite.
+
+  I'll report when wave 1 finishes.
+
+✻ Waiting for 1 dynamic workflow to finish
+
+────────────────────────────────────────────────────────────────────────────────
+❯ go with the separate GTK4 process, launch the agents
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ⧉ 3 · ← 2 agents
+
+  ◯ smartpanel-v2-wave1  ▰▰▰▰▰▰▱▱▱▱  6/10 · 41m 12s

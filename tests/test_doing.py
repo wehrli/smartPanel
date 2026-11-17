@@ -58,3 +58,7 @@ def test_mcp_tool_header():
     text = pane("running_bash").replace(
         "● Bash(npm test -- filters)", "● Redmine - list_issues (MCP)(project: \"ledgerly\")")
     assert describe_running(text) == 'Redmine - list_issues · project: "ledgerly"'
+
+
+def test_other_background_work_is_named_as_the_tui_names_it():
+    assert describe_running(pane("running_workflow")) == "Waiting for 1 dynamic workflow"

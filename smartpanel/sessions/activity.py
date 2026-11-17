@@ -55,6 +55,9 @@ TAIL_LINES = 30
 # "· esc to interrupt", or "✻ Waiting for 2 background agents to finish" when
 # the main turn is done but agents are not.
 _RUNNING_MARKERS = ("esc to interrupt", "background agent")
+# The same idle-but-not-done line for other kinds of background work, e.g.
+# "✻ Waiting for 1 dynamic workflow to finish" (real capture).
+_WAITING_FOR = re.compile(r"waiting for \d+ [a-z][\w -]*? to finish")
 
 # The hint line under any modal Claude Code puts up: "Enter to confirm · Esc to
 # cancel" on a permission or trust prompt, "Enter to select · Tab/Arrow keys to
@@ -96,7 +99,7 @@ def classify_pane(text: str, tail_lines: int = TAIL_LINES) -> str:
     if _has_confirm_footer(tail) or _has_choice_box(tail):
         return WAITING
     lowered = "\n".join(tail).lower()
-    if any(m in lowered for m in _RUNNING_MARKERS):
+    if any(m in lowered for m in _RUNNING_MARKERS) or _WAITING_FOR.search(lowered):
         return RUNNING
     return IDLE
 

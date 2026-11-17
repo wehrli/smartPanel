@@ -23,7 +23,8 @@ from smartpanel.sessions.activity import TAIL_LINES, is_rule
 
 MAX_DETAIL_CHARS = 60
 
-_AGENTS = re.compile(r"waiting for (\d+) background agents?", re.IGNORECASE)
+# "✻ Waiting for 2 background agents to finish", "… 1 dynamic workflow …".
+_AGENTS = re.compile(r"waiting for (\d+) ([a-z][\w -]*?)(?: to finish|\s*$)", re.IGNORECASE)
 _BULLET = re.compile(r"^[●⏺]\s+(.*\S)\s*$")
 # `Tool(args)`: one word (MCP tools: "server - tool (MCP)"), then the argument,
 # whose closing paren may have wrapped onto the next row.
@@ -41,10 +42,9 @@ def describe_running(pane: str, tail_lines: int = TAIL_LINES) -> str | None:
 
     for i in range(len(lines) - 1, -1, -1):
         line = lines[i]
-        m = _AGENTS.search(line)
+        m = _AGENTS.search(line.strip())
         if m:
-            n = int(m.group(1))
-            return f"Waiting for {n} background agent{'' if n == 1 else 's'}"
+            return f"Waiting for {int(m.group(1))} {m.group(2).strip()}"
         b = _BULLET.match(line)
         if not b:
             continue

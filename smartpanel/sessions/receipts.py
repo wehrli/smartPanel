@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -47,6 +48,7 @@ class ReceiptIndex:
     def __init__(self, directory: Path | str | None = None):
         self._directory = Path(directory) if directory else None
         self._cache: dict[str, tuple[float, int, JournalEntry]] = {}
+        self._lock = threading.Lock()  # scans run on worker threads; two may overlap
 
     @property
     def directory(self) -> Path:
@@ -54,6 +56,10 @@ class ReceiptIndex:
 
     def scan(self) -> list[JournalEntry]:
         """Every receipt, newest first. Never raises."""
+        with self._lock:
+            return self._scan()
+
+    def _scan(self) -> list[JournalEntry]:
         try:
             paths = [p for p in self.directory.glob("*.md") if p.is_file()]
         except OSError as e:

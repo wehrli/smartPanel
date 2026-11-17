@@ -18,6 +18,7 @@ EXPECTED = {
     "running_read": RUNNING,
     "running_described_bash": RUNNING,
     "running_thinking": RUNNING,
+    "running_workflow": RUNNING,
     "idle_prose_question": IDLE,
     "user_numbered": IDLE,
     "user_numbered_draft": IDLE,
