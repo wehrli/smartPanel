@@ -301,3 +301,32 @@ def test_explicit_flag_false_disables_template():
     theme = Theme(top_bar_format="{CPU.PERCENTAGE}")
     theme.top_bar_format_explicit = False      # type: ignore[attr-defined]
     assert barspec.theme_template(theme) is None
+
+
+def test_icon_desc_has_no_live_readings():
+    a, b = fx.busy(), fx.busy()
+    b.system.cpu.percent, b.system.memory.percent, b.spend.cost_today = 91.0, 77.0, 99.5
+    assert compose_bar(a, cfg()).icon_desc == compose_bar(b, cfg()).icon_desc
+    assert compose_bar(a, cfg()).accessible_desc != compose_bar(b, cfg()).accessible_desc
+    assert "swap critical" in compose_bar(fx.swap_crit(), cfg()).icon_desc
+    assert "tmux is not installed" in compose_bar(fx.notmux(), cfg()).icon_desc
+
+
+def test_template_guide_zeroes_digits_and_reserves_badge():
+    theme = Theme(top_bar_format="⚡{CPU.PERCENTAGE:.0f}% {MEMORY.PERCENTAGE:.0f}%")
+    theme.top_bar_format_explicit = True       # type: ignore[attr-defined]
+    label, guide = barspec.render_template_with_guide(theme, fx.busy())
+    assert label == "⚡23% 68%" and guide == "🔴🔃000% ⚡00% 00%"
+    label2, guide2 = barspec.render_template_with_guide(theme, fx.swap_crit())
+    assert label2.startswith("🔴🔃88%") and guide2 == guide and len(guide) >= len(label2)
+    spec = compose_bar(fx.busy(), cfg(), template_label=label, template_guide_str=guide)
+    assert spec.guide == guide
+    # without an explicit guide compose_bar still never echoes the raw value
+    assert compose_bar(fx.busy(), cfg(), template_label=label).guide == "⚡00% 00%"
+
+
+def test_template_that_places_swap_gets_no_badge_reserve():
+    theme = Theme(top_bar_format="{SWAP.STATUS} ⚡{CPU.PERCENTAGE:.0f}%")
+    theme.top_bar_format_explicit = True       # type: ignore[attr-defined]
+    label, guide = barspec.render_template_with_guide(theme, fx.busy())
+    assert label == "🔃12% ⚡23%" and guide == "🔃00% ⚡00%"

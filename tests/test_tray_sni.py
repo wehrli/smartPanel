@@ -82,3 +82,18 @@ def test_emit_without_connection_is_noop():
     it._emit("NewIcon")                      # not exported: silently ignored
     it.set_label("x", "y")
     assert isinstance(it.get_variant("XAyatanaLabel"), GLib.Variant)
+
+
+def test_new_icon_only_when_icon_or_desc_changes():
+    it = item()
+    sent = []
+    it._emit = lambda name, params=None: sent.append(name)
+    it.set_icon("/run/x/bar-1.png", "smartPanel: 4 sessions")
+    assert sent == ["NewIcon"]                 # Active: no NewAttentionIcon
+    sent.clear()
+    it.set_icon("/run/x/bar-1.png", "smartPanel: 4 sessions")
+    assert sent == []
+    it.set_status(sni.NEEDS_ATTENTION)
+    sent.clear()
+    it.set_icon("/run/x/bar-2.png", "smartPanel: 4 sessions")
+    assert sent == ["NewIcon", "NewAttentionIcon"]

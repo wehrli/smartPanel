@@ -7,9 +7,15 @@ modules (`barspec`, `menu`, `barrender`, `dbusmenu` model); this file only decid
 * Store change -> recompute `BarSpec` and the menu rows.
 * Label: `XAyatanaNewLabel` only when the label or guide string changed.
 * Icon: re-rendered only when the `IconSpec` changed. Structural changes (strip
-  blocks, swap level, toggles) go out at once; graph-only value changes are
-  throttled to `icon_min_interval` (one CPU tick), so a memory sample arriving
-  between two CPU samples never costs a second PNG (SP-0203).
+  blocks, swap level, toggles) go out at once. Graph-only value changes redraw at
+  the CPU interval, no faster (SP-0203): a new CPU sample renders (at most once
+  per `icon_min_interval`), while a memory/swap value moving between two CPU
+  samples is parked and folded into the next CPU-driven render. If the CPU
+  history stops moving, the parked change still goes out after
+  `icon_fallback_interval`.
+* The icon's `IconAccessibleDesc` is `BarSpec.icon_desc` (no live readings), the
+  live numbers go in the ToolTip, so a CPU tick never makes the host reload an
+  unchanged PNG (SP-1905).
 * Menu: fixed rows, property updates only (SP-2002).
 * Ticker (A5): a `GLib.timeout_add_seconds(bar.ticker_seconds)` that exists only
   while `bar.ticker` is on; it advances `app.ticker_index` unless pinned (by the
@@ -60,12 +66,13 @@ class _ConfigView:
 class Tray:
     def __init__(self, store, actions, config, theme=None, *, icon_dir=None,
                  path: str = ITEM_PATH, item_id: str = "smartpanel",
-                 icon_min_interval: float = 1.0):
+                 icon_min_interval: float = 1.0, icon_fallback_interval: float = 10.0):
         self.store, self.actions, self.config = store, actions, config
         self.theme = theme
         self.path = path
         self.item_id = item_id
         self.icon_min_interval = icon_min_interval
+        self.icon_fallback_interval = icon_fallback_interval
         self.cfg = _ConfigView(config, store)
         self.icons = IconWriter(icon_dir)
         self.sni: StatusNotifierItem | None = None
@@ -151,8 +158,11 @@ class Tray:
 
     def compose(self) -> barspec.BarSpec:
         state = self.store.state
-        template = barspec.render_template(self.theme, state)
-        return barspec.compose_bar(state, self.cfg, template_label=template)
+        tpl = barspec.render_template_with_guide(self.theme, state)
+        if tpl is None:
+            return barspec.compose_bar(state, self.cfg)
+        return barspec.compose_bar(state, self.cfg, template_label=tpl[0],
+                                   template_guide_str=tpl[1])
 
     def _refresh_bar(self, force: bool = False) -> None:
         spec = self.compose()
@@ -165,9 +175,9 @@ class Tray:
         if spec.icon is None:
             self._cancel_pending_icon()
             self._icon_applied = None
-            sni.set_icon(spec.icon_name, spec.accessible_desc)
+            sni.set_icon(spec.icon_name, spec.icon_desc)
         else:
-            self._apply_icon(spec.icon, spec.accessible_desc, force)
+            self._apply_icon(spec.icon, spec.icon_desc, force)
 
     def _refresh_menu(self) -> None:
         if self.menu_server is None:
@@ -186,24 +196,39 @@ class Tray:
 
     def _apply_icon(self, icon: barspec.IconSpec, desc: str, force: bool = False) -> None:
         if icon == self._icon_applied and not force:
+            self._cancel_pending_icon()
             if self.sni:
                 self.sni.set_icon(self.sni.props["IconName"], desc)
             return
-        elapsed = time.monotonic() - self._icon_last_render
-        if force or self._structural(self._icon_applied, icon) or elapsed >= self.icon_min_interval:
+        applied = self._icon_applied
+        if force or self._structural(applied, icon):
             self._cancel_pending_icon()
             self._render_icon(icon, desc)
             return
+        elapsed = time.monotonic() - self._icon_last_render
+        if icon.cpu != applied.cpu:
+            # A CPU tick: this is the redraw cadence (the new spec already carries
+            # the latest memory/swap values, so any parked change folds in here).
+            if elapsed >= self.icon_min_interval:
+                self._cancel_pending_icon()
+                self._render_icon(icon, desc)
+            else:
+                self._park_icon(icon, self.icon_min_interval - elapsed)
+            return
+        # Memory/swap moved between CPU ticks: wait for the next CPU sample.
+        self._park_icon(icon, max(self.icon_fallback_interval - elapsed, 0.001))
+
+    def _park_icon(self, icon: barspec.IconSpec, delay_s: float) -> None:
         self._icon_pending = icon
         if not self._icon_pending_id:
-            delay = max(1, int((self.icon_min_interval - elapsed) * 1000))
+            delay = max(1, int(delay_s * 1000))
             self._icon_pending_id = GLib.timeout_add(delay, self._on_icon_pending)
 
     def _on_icon_pending(self) -> bool:
         self._icon_pending_id = 0
         icon, self._icon_pending = self._icon_pending, None
         if icon is not None and icon != self._icon_applied and self.spec is not None:
-            self._render_icon(icon, self.spec.accessible_desc)
+            self._render_icon(icon, self.spec.icon_desc)
         return False
 
     def _cancel_pending_icon(self) -> None:

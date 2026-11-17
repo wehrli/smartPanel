@@ -222,13 +222,21 @@ class StatusNotifierItem:
         return changed
 
     def set_icon(self, icon_name: str, accessible_desc: str | None = None) -> bool:
+        """Set the icon (and its description); `NewIcon` only when either changed.
+
+        The host re-reads *and reloads* the icon on `NewIcon` (a wide PNG takes the
+        uncached `_loadCustomImage` path), so callers must pass a description that
+        doesn't move with live readings. `NewAttentionIcon` only matters while the
+        item is NeedsAttention, so it is not emitted otherwise.
+        """
         changed = self._set("IconName", icon_name)
-        self._set("AttentionIconName", icon_name)
+        attn = self._set("AttentionIconName", icon_name)
         if accessible_desc is not None:
             changed = self._set("IconAccessibleDesc", accessible_desc) or changed
-            self._set("AttentionAccessibleDesc", accessible_desc)
+            attn = self._set("AttentionAccessibleDesc", accessible_desc) or attn
         if changed:
             self._emit("NewIcon")
+        if attn and self.props.get("Status") == NEEDS_ATTENTION:
             self._emit("NewAttentionIcon")
         return changed
 

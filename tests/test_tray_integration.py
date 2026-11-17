@@ -159,7 +159,9 @@ def test_properties_over_the_bus(setup):
     assert get("XAyatanaLabelGuide") == "⚠100 · 00/00 · 000.00"
     icon = get("IconName")
     assert icon.startswith(str(tmp)) and os.path.isabs(icon) and os.path.exists(icon)
-    assert get("IconAccessibleDesc").startswith("smartPanel: swap 12%")
+    # The icon's description carries no live readings (SP-1905); the ToolTip does.
+    assert get("IconAccessibleDesc") == "smartPanel: 4 sessions, 1 waiting for you, 2 running"
+    assert get("ToolTip")[3].startswith("smartPanel: swap 12%")
 
 
 def test_label_signal_only_when_changed(setup):
@@ -309,5 +311,67 @@ def test_theme_template_wins(bus, tmp_path):
     tray.start(app)
     try:
         assert tray.sni.props["XAyatanaLabel"] == "⚡23% · 4"
+    finally:
+        tray.stop()
+
+
+def test_cpu_tick_with_graphs_off_emits_no_new_icon(setup):
+    """SP-1905: a reading that only moves the ToolTip must not make the host reload
+    the (unchanged) PNG - the extension reloads on every NewIcon."""
+    app, host, watcher, store, actions, config, tray, signals, tmp = setup
+    config.set("bar.graphs", False)
+    spin(timeout=0.05)
+    signals.clear()
+    n = tray.icon_renders
+    for v in (31.0, 47.0, 62.0):
+        store.mutate("system", lambda s, v=v: (setattr(s.cpu, "percent", v),
+                                               setattr(s.memory, "percent", v)))
+    spin(timeout=0.1)
+    names = [s[1] for s in signals]
+    assert "NewIcon" not in names and "NewAttentionIcon" not in names
+    assert "NewToolTip" in names
+    assert tray.icon_renders == n
+
+
+def test_memory_only_change_waits_for_next_cpu_tick(setup):
+    """SP-0203: the graphs redraw at the CPU interval, no faster - a memory or swap
+    sample between two CPU samples is folded into the next CPU-driven render."""
+    app, host, watcher, store, actions, config, tray, signals, tmp = setup
+    tray.icon_min_interval = 0.0
+    tray.icon_fallback_interval = 60.0
+    tray._icon_last_render = time.monotonic() - 2.0      # 2 s since the last CPU render
+    n = tray.icon_renders
+    store.mutate("system", lambda s: setattr(s.memory, "percent", 91.0))
+    store.mutate("system", lambda s: setattr(s.swap, "percent", 13.0))
+    assert tray.icon_renders == n and tray._icon_pending_id   # parked, not drawn
+    store.mutate("system", lambda s: s.cpu.history.append(55.0))   # the CPU tick
+    assert tray.icon_renders == n + 1 and not tray._icon_pending_id
+    assert tray._icon_applied.mem_pct == 91.0 and tray._icon_applied.swap_pct == 13.0
+
+
+def test_memory_only_change_falls_back_when_cpu_stalls(setup):
+    app, host, watcher, store, actions, config, tray, signals, tmp = setup
+    tray.icon_fallback_interval = 0.05
+    tray._icon_last_render = time.monotonic()
+    n = tray.icon_renders
+    store.mutate("system", lambda s: setattr(s.memory, "percent", 91.0))
+    assert tray.icon_renders == n
+    assert spin(lambda: tray.icon_renders == n + 1, timeout=1.0)
+
+
+def test_theme_template_guide_is_stable(bus, tmp_path):
+    from smartpanel.theme.model import Theme
+    app, host = bus
+    theme = Theme(top_bar_format="⚡{CPU.PERCENTAGE:.0f}% · {SESSIONS.COUNT}")
+    theme.top_bar_format_explicit = True       # type: ignore[attr-defined]
+    store = Store(fx.busy())
+    tray = Tray(store, RecordingActions(), Config(), theme=theme, icon_dir=tmp_path)
+    tray.start(app)
+    try:
+        guide = tray.sni.props["XAyatanaLabelGuide"]
+        store.mutate("system", lambda s: setattr(s.cpu, "percent", 87.0))
+        assert tray.sni.props["XAyatanaLabel"] == "⚡87% · 4"
+        assert tray.sni.props["XAyatanaLabelGuide"] == guide
+        assert len(guide) >= len("🔴🔃100% ⚡87% · 4")
     finally:
         tray.stop()

@@ -74,8 +74,11 @@ class BarSpec:
     label: str = ""
     icon: IconSpec | None = None          # None -> show `icon_name`
     icon_name: str = ICON_PLAIN
-    accessible_desc: str = "smartPanel"
+    accessible_desc: str = "smartPanel"   # full reading: the ToolTip
     guide: str = ""
+    # Slow-changing description for IconAccessibleDesc. No live CPU/memory/spend
+    # numbers: the host reloads the icon whenever any `Icon*` property changes.
+    icon_desc: str = "smartPanel"
     ticker: bool = False                  # A5 is what the label shows
     ticker_pinned_by_alert: bool = False
     loading: bool = False
@@ -309,10 +312,46 @@ def accessible_desc(state: PanelState) -> str:
     return "smartPanel: " + ", ".join(parts)
 
 
+def icon_desc(state: PanelState) -> str:
+    """What the icon shows, worded for a screen reader, without live readings.
+
+    Changes only with the things the icon itself changes with (swap level, the
+    session strip, loading), so setting it never forces a reload of an unchanged PNG.
+    """
+    if state.app.loading is not None:
+        return "smartPanel: reading transcripts"
+    parts: list[str] = []
+    sw = state.system.swap
+    if sw.percent is not None and sw.level in (LEVEL_WARNING, LEVEL_CRITICAL):
+        parts.append("swap " + ("critical" if sw.level == LEVEL_CRITICAL else "high"))
+    if state.sessions.tmux_ok:
+        c = counts(state)
+        n = len(state.sessions.items)
+        s = f"{n} session" + ("" if n == 1 else "s")
+        if c[WAITING]:
+            s += f", {c[WAITING]} waiting for you"
+        if c[RUNNING]:
+            s += f", {c[RUNNING]} running"
+        parts.append(s)
+    else:
+        parts.append("tmux is not installed")
+    return "smartPanel: " + ", ".join(parts)
+
+
+def template_guide(template_label: str, badge_worst: str = "") -> str:
+    """Guide for a theme template (SP-1903/1904): digits zeroed so it doesn't move
+    with the value, plus the worst-case swap badge when the theme gets it prefixed."""
+    g = _zero(template_label)
+    if badge_worst and not g.startswith(_zero(badge_worst)):
+        g = f"{_zero(badge_worst)} {g}"
+    return g
+
+
 # ───────────────────────── composition ─────────────────────────
 
 def compose_bar(state: PanelState, config: Any = None, *,
-                template_label: str | None = None) -> BarSpec:
+                template_label: str | None = None,
+                template_guide_str: str | None = None) -> BarSpec:
     """The whole top bar for one state. `config` is a Config, a mapping or None.
 
     `template_label` is a theme's already-rendered `top_bar_format` (SP-1904); when
@@ -320,16 +359,21 @@ def compose_bar(state: PanelState, config: Any = None, *,
     """
     cfg = bar_settings(config)
     desc = accessible_desc(state)
+    idesc = icon_desc(state)
 
     if state.app.loading is not None:
         return BarSpec(label=loading_label(state), icon=None, icon_name=ICON_LOADING,
-                       accessible_desc=desc, guide=loading_guide(state), loading=True)
+                       accessible_desc=desc, guide=loading_guide(state), loading=True,
+                       icon_desc=idesc)
 
     icon = icon_spec(state, bool(cfg["bar.strip"]), bool(cfg["bar.graphs"]))
     ticker = False
     pinned_by_alert = False
     if template_label is not None:
-        label, guide = template_label, template_label
+        label = template_label
+        guide = template_guide_str if template_guide_str is not None else _zero(template_label)
+        if len(guide) < len(label):
+            guide = _zero(label)
     elif cfg["bar.ticker"]:
         ticker = True
         pinned_by_alert = ticker_alert(state) is not None
@@ -339,7 +383,8 @@ def compose_bar(state: PanelState, config: Any = None, *,
     else:
         label, guide = "", ""
     return BarSpec(label=label, icon=icon, icon_name=ICON_PLAIN, accessible_desc=desc,
-                   guide=guide, ticker=ticker, ticker_pinned_by_alert=pinned_by_alert)
+                   guide=guide, ticker=ticker, ticker_pinned_by_alert=pinned_by_alert,
+                   icon_desc=idesc)
 
 
 # ───────────────────────── theme template (SP-1904) ─────────────────────────
@@ -430,18 +475,37 @@ def legacy_values(state: PanelState, now: float | None = None) -> dict[str, dict
 
 def render_template(theme: Any, state: PanelState) -> str | None:
     """Render the theme's own template against the state, or None (composition wins)."""
+    out = render_template_with_guide(theme, state)
+    return None if out is None else out[0]
+
+
+def render_template_with_guide(theme: Any, state: PanelState) -> tuple[str, str] | None:
+    """(label, guide) for the theme's own template, or None (composition wins).
+
+    The guide zeroes every digit of the un-badged text and, when the theme doesn't
+    place `{SWAP.*}` itself, reserves the worst-case badge ('🔴🔃100%') in front,
+    so neither the value nor the alert coming and going makes the label jitter.
+    """
     template = theme_template(theme)
     if template is None:
         return None
+    from smartpanel import alerts
     from smartpanel.render import format_top_bar
     try:
         values = legacy_values(state)
-        text = format_top_bar(template, values)
+        base = format_top_bar(template, values)
     except Exception:
-        return "smartPanel"
+        return "smartPanel", "smartPanel"
+    text = base
+    worst = ""
     # v1 `_with_alert_badge`: a theme that doesn't place the swap gauge itself still
     # gets the alert, prefixed because the panel truncates from the right.
-    badge = values["SWAP"]["ALERT"]
-    if badge and "{SWAP." not in template:
-        text = f"{badge} {text}" if text else badge
-    return text
+    if "{SWAP." not in template:
+        worst = alerts.swap_badge(alerts.Level.CRITICAL, 100.0)
+        badge = values["SWAP"]["ALERT"]
+        if badge:
+            text = f"{badge} {text}" if text else badge
+    guide = template_guide(base, worst)
+    if len(guide) < len(text):
+        guide = _zero(text)
+    return text, guide
