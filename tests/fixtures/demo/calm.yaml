@@ -720,6 +720,7 @@ settings:
     sessions.reattach: true
     sessions.dir: ~/dev/omdev
     sessions.terminal: terminator
+    sessions.last_dir: null
     disk.mount: /
     hud.enabled: false
     hud.corner: top-right

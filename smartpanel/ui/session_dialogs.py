@@ -305,6 +305,7 @@ def new_session(window, store, actions, config):
             return
         picked["launched"] = True
         _LAST_USED["path"] = path
+        _remember_dir(store, actions, path)
         _launch(window, store, actions, terminal, path)
 
     def on_activated(*_):
@@ -336,7 +337,8 @@ def new_session(window, store, actions, config):
     browse.connect("clicked", on_browse)
     dialog.connect("response", lambda _d, r: r == "open" and launch(selected_path()))
 
-    idx = preselect(folders, _LAST_USED["path"], store.state.sessions.items)
+    last = _LAST_USED["path"] or _cfg(config, "sessions.last_dir")
+    idx = preselect(folders, last, store.state.sessions.items)
     if idx is not None:
         flow.select_child(children[idx])
     sync()
@@ -348,6 +350,17 @@ def new_session(window, store, actions, config):
         return GLib.SOURCE_REMOVE
     GLib.idle_add(focus_selection)
     return result
+
+
+def _remember_dir(store, actions, path: str) -> None:
+    """Persist the picked folder (`sessions.last_dir`) so the next picker, even
+    after a restart, preselects it. Skipped when it is already the value."""
+    try:
+        if (store.state.settings.values or {}).get("sessions.last_dir") == path:
+            return
+        actions.set_setting("sessions.last_dir", path)
+    except Exception:  # noqa: BLE001 — remembering is a nicety, launching is not
+        log.exception("could not remember %s", path)
 
 
 def _expand(path: str) -> str:

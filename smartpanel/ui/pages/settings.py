@@ -575,6 +575,8 @@ class SettingsPage(Adw.PreferencesPage):
 
         by_group: dict[str, list[str]] = {}
         for key, spec in SPECS.items():
+            if spec.hidden:          # remembered state (sessions.last_dir), not a setting
+                continue
             by_group.setdefault(spec.group, []).append(key)
         order = list(GROUP_ORDER) + [g for g in by_group if g not in GROUP_ORDER]
         for name in order:

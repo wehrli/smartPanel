@@ -52,6 +52,7 @@ DEFAULTS: dict[str, Any] = {
     "budget.daily_usd": None, "notifications.budget": True,
     "sessions.journal": True, "sessions.min_age_s": 120, "sessions.confirm_seconds": 5,
     "sessions.reattach": True, "sessions.dir": "~/dev/omdev", "sessions.terminal": "terminator",
+    "sessions.last_dir": None,
     "disk.mount": "/",
     "hud.enabled": False, "hud.corner": "top-right", "hud.margin": 30,
     "appearance.style": "system",
@@ -89,14 +90,15 @@ class SettingOverridden(ValueError):
 class Spec:
     """How one key is validated, and how the Settings page labels it (SP-2402)."""
 
-    kind: str                   # "bool" | "int" | "num" | "money" | "str" | "choice"
-    group: str                  # Settings page group
+    kind: str                   # "bool" | "int" | "num" | "money" | "str" | "optstr" | "choice"
+    group: str                  # Settings page group ("Internal" for hidden keys)
     label: str
     hint: str = ""
     min: float | None = None
     max: float | None = None
     choices: tuple[str, ...] = ()
     unit: str = ""
+    hidden: bool = False        # remembered state, not a preference: no Settings row
 
     def coerce(self, key: str, value: Any) -> Any:
         """Validated, normalised value, or ValueError naming the key."""
@@ -128,6 +130,12 @@ class Spec:
                 if key == "disk.mount" and not v.startswith("/"):
                     raise ValueError(f"{key} must be an absolute path")
                 return v
+            case "optstr":
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    return None
+                if not isinstance(value, str):
+                    raise ValueError(f"{key} must be a string or null")
+                return value.strip()
             case "choice":
                 if not isinstance(value, str) or value.strip().lower() not in self.choices:
                     raise ValueError(f"{key} must be one of {', '.join(self.choices)}")
@@ -203,6 +211,8 @@ SPECS: dict[str, Spec] = {
     "sessions.dir": Spec("str", "Sessions", "New sessions start in",
                          "Folder picker opens here"),
     "sessions.terminal": Spec("str", "Sessions", "Terminal"),
+    "sessions.last_dir": Spec("optstr", "Internal", "Last folder a session started in",
+                              "Preselected in the New session picker", hidden=True),
     "disk.mount": Spec("str", "System", "Disk to watch"),
     "hud.enabled": Spec("bool", "Desktop", "Desktop HUD",
                         "Spend and sessions drawn on the wallpaper"),

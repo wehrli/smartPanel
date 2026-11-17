@@ -69,7 +69,8 @@ def make(tmp_path):
 def test_every_key_has_a_row_in_its_group(make):
     from smartpanel.ui.pages import settings
     page, *_ = make()
-    assert set(page.controls) == set(SPECS)
+    assert set(page.controls) == {k for k, s in SPECS.items() if not s.hidden}
+    assert "sessions.last_dir" not in page.controls
     assert list(page.groups) == list(settings.GROUP_ORDER)
     assert isinstance(page, Adw.PreferencesPage)
 

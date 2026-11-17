@@ -308,3 +308,21 @@ def test_bind_store_mirrors_values_and_overrides(path):
     assert store.state.settings.values["budget.daily_usd"] == 40.0
     assert sections == [{"settings"}]
     store.to_json()   # stays serialisable
+
+
+def test_last_dir_is_an_optional_hidden_string():
+    assert DEFAULTS["sessions.last_dir"] is None
+    assert SPECS["sessions.last_dir"].hidden
+    assert not any(s.hidden for k, s in SPECS.items() if k != "sessions.last_dir")
+    assert validate("sessions.last_dir", " /home/u/dev/x ") == "/home/u/dev/x"
+    assert validate("sessions.last_dir", "") is None
+    assert validate("sessions.last_dir", None) is None
+    with pytest.raises(ValueError):
+        validate("sessions.last_dir", 3)
+
+
+def test_last_dir_round_trips_through_the_file(tmp_path):
+    path = tmp_path / "config.yaml"
+    cfg = Config.load(path, env={})
+    cfg.set("sessions.last_dir", "/home/u/dev/ledgerly")
+    assert Config.load(path, env={}).get("sessions.last_dir") == "/home/u/dev/ledgerly"

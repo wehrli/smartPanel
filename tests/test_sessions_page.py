@@ -453,6 +453,7 @@ def test_new_session_open_launches_and_progress_follows_state(shell, monkeypatch
     d.emit("response", "open")
     assert ("new_session", ("/tmp/a",)) in actions.calls
     assert sd._LAST_USED["path"] == "/tmp/a"
+    assert ("set_setting", ("sessions.last_dir", "/tmp/a")) in actions.calls
     progress = win.dialogs.current
     assert progress is not None and progress.get_title() == "Opening Terminator"
     store.mutate("sessions", lambda s: setattr(s.items[0], "phase", PHASE_NONE))
@@ -510,3 +511,15 @@ def test_demo_controller_flow_drives_the_page(tmp_path):
     assert any(e.kind == "toast" and e.data["text"].startswith("Sent “1”") for e in events)
     _drain()
     ctl.stop()
+
+
+def test_new_session_preselects_the_persisted_last_dir(shell, monkeypatch):
+    """After a restart the in-memory pick is gone; `sessions.last_dir` remains."""
+    from smartpanel.ui import session_dialogs as sd
+    win, store, _ = shell
+    monkeypatch.setitem(sd._LAST_USED, "path", None)
+    actions = Rec([{"name": "a", "path": "/tmp/a"}, {"name": "b", "path": "/tmp/b"}])
+    d = sd.new_session(win, store, actions, Cfg(**{"sessions.last_dir": "/tmp/b"}))
+    sel = _flow(d).get_selected_children()
+    assert sel and sel[0].get_index() == 1
+    d.force_close()
