@@ -264,7 +264,12 @@ def test_budget_notifications_once_per_day(tmp_path):
     assert sent == []
     cfg.set("budget.daily_usd", today / 0.85)          # 85 %
     assert [k for k, *_ in sent] == ["budget_80"]
-    assert sent[0][3] == {"label": "View", "page": "overview"}
+    action = sent[0][3]
+    assert (action.label, action.page) == ("View", "overview")
+    events = []
+    store.on_event(events.append)
+    action.callback()
+    assert [(e.kind, e.data) for e in events] == [("open_dashboard", {"page": "overview"})]
     svc.refresh_now()
     sched.settle()
     assert len(sent) == 1
@@ -290,6 +295,42 @@ def test_no_budget_notifications_when_turned_off(tmp_path):
     assert sent == []
 
 
+def test_threshold_crossed_while_off_fires_when_turned_back_on(tmp_path):
+    svc, _, cfg, sched, sent, _ = make(tmp_path, budget=0.01, notifications=False)
+    svc.start()
+    sched.settle()
+    assert sent == []
+    cfg.set("notifications.budget", True)
+    assert [k for k, *_ in sent] == ["budget_100"]
+    svc.refresh_now()
+    sched.settle()
+    assert len(sent) == 1                               # still once per day
+
+
+def test_a_raising_notifier_does_not_break_the_hand_off(tmp_path):
+    svc, store, _, sched, _, _ = make(tmp_path, budget=0.01)
+    def boom(*a):
+        raise RuntimeError("bubble")
+    svc._notify = boom
+    svc.start()
+    sched.settle()
+    assert store.state.spend.cost_today > 0
+    assert store.state.app.loading is None
+
+
+def test_stop_discards_an_in_flight_result(tmp_path):
+    svc, store, _, sched, sent, _ = make(tmp_path, budget=0.01)
+    svc.start()
+    sched.run_threads()                                 # worker done, result queued
+    svc.stop()
+    sched.pump()
+    assert store.state.spend.cost_today is None
+    assert sent == []
+    svc.start()                                         # not wedged as "busy"
+    sched.settle()
+    assert store.state.spend.cost_today > 0
+
+
 def test_no_budget_no_notifications(tmp_path):
     svc, _, _, sched, sent, _ = make(tmp_path, budget=None)
     svc.start()
@@ -306,8 +347,52 @@ def test_default_notifier_uses_the_v2_signature(monkeypatch):
     def send(kind, title, body, action=None):
         calls.append((kind, title, body, action))
     monkeypatch.setattr(notify, "send", send)
+    default_notifier("budget_80", "T", "B", None)
+    assert calls == [("budget_80", "T", "B", None)]
+
+
+def test_default_notifier_hands_v2_a_real_action(monkeypatch):
+    """Mirrors WP-system's v2 notify: `Action(label, callback)` dataclass, and a
+    backend that reads `action.label` — a dict there raises and drops the bubble."""
+    from dataclasses import dataclass
+    from smartpanel import notify
+    from smartpanel.services.spend import BudgetAction
+
+    @dataclass(frozen=True)
+    class Action:
+        label: str
+        callback: object
+
+    shown = []
+
+    def send(kind, title="", body="", *, action=None, key=None, urgency=None):
+        try:
+            shown.append((kind, title, action.label if action else None, action))
+            return True
+        except Exception:
+            return False
+    monkeypatch.setattr(notify, "Action", Action, raising=False)
+    monkeypatch.setattr(notify, "send", send)
+    clicked = []
+    default_notifier("budget_80", "T", "B",
+                     BudgetAction("View", "overview", lambda: clicked.append(1)))
+    (kind, title, label, action), = shown
+    assert (kind, title, label) == ("budget_80", "T", "View")
+    assert isinstance(action, Action)
+    action.callback()
+    assert clicked == [1]
+
+
+def test_default_notifier_drops_an_action_v2_cannot_take(monkeypatch):
+    from smartpanel import notify
+    calls = []
+
+    def send(kind, title="", body="", *, action=None):
+        calls.append(action)
+    monkeypatch.setattr(notify, "send", send)
+    monkeypatch.delattr(notify, "Action", raising=False)
     default_notifier("budget_80", "T", "B", {"label": "View", "page": "overview"})
-    assert calls == [("budget_80", "T", "B", {"label": "View", "page": "overview"})]
+    assert calls == [None]
 
 
 def test_default_notifier_falls_back_to_the_v1_signature(monkeypatch):
@@ -368,7 +453,6 @@ def test_cold_scan_of_1200_files_keeps_every_main_loop_callback_under_50ms(tmp_p
             (pdir / f"s{f}.jsonl").write_text(json.dumps(line) + "\n")
     svc, store, _, sched, _, _ = make(tmp_path, root=root, budget=40.0)
     timings = []
-    original_tick = svc._tick
 
     def timed(fn):
         def run():
@@ -378,7 +462,7 @@ def test_cold_scan_of_1200_files_keeps_every_main_loop_callback_under_50ms(tmp_p
         return run
     sched.idle_add = lambda fn: sched.idle.append(timed(fn))
     t0 = time.perf_counter()
-    original_tick()
+    svc.start()                                     # schedules + first tick
     timings.append(time.perf_counter() - t0)        # the tick itself
     sched.settle()
     assert store.state.spend.cost_today > 0

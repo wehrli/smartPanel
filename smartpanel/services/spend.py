@@ -15,7 +15,10 @@ How it runs (SP-0801):
   `~/.claude/projects` is missing or holds no `*.jsonl` (SP-2603).
 - Budget: the forecast is recomputed on every result and whenever `budget.daily_usd`
   changes; 80 % / 100 % notifications fire once each per local day (SP-0902) when a
-  budget is set and `notifications.budget` is on.
+  budget is set and `notifications.budget` is on. A threshold crossed while
+  notifications are off is not recorded, so it fires once they are turned back on.
+  The bubble's "View" button opens the dashboard's overview (Event open_dashboard).
+- After `stop()`, a result still in flight is discarded: nothing reaches the Store.
 
 Everything GLib-specific sits behind a small scheduler object, so tests drive the
 thread hand-off deterministically without a main loop.
@@ -26,6 +29,7 @@ import inspect
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -33,7 +37,7 @@ from smartpanel.claude_stats.aggregator import Aggregator, Snapshot
 from smartpanel.claude_stats.budget import BudgetAlerts, budget_message
 from smartpanel.claude_stats.forecast import forecast
 from smartpanel.claude_stats.spend_state import build_spend_state, days
-from smartpanel.state.model import Loading
+from smartpanel.state.model import Event, Loading
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +67,10 @@ class GLibScheduler:
 
     def idle_add(self, fn: Callable[[], Any]) -> None:
         def once():
-            fn()
+            try:
+                fn()
+            except Exception:  # noqa: BLE001 — services never raise into the loop
+                log.exception("spend hand-off failed")
             return False        # GLib.SOURCE_REMOVE
         self._GLib.idle_add(once)
 
@@ -73,12 +80,43 @@ class GLibScheduler:
 
 # ───────────────────────── notifications ─────────────────────────
 
+@dataclass(frozen=True)
+class BudgetAction:
+    """The bubble's button: `label`, the dashboard `page` it opens, and the
+    main-loop `callback` that opens it. Injected notifiers receive this as is;
+    `default_notifier` converts it to whatever `smartpanel.notify` expects."""
+
+    label: str
+    page: str
+    callback: Callable[[], None]
+
+
+def _to_notify_action(notify, action: Any):
+    """Translate a BudgetAction into `notify.Action(label, callback)`.
+
+    v2's libnotify backend reads `action.label` / `action.callback`, so a dict or
+    any other shape would make it raise and drop the bubble. Without a usable
+    callback or an `Action` type, send no button rather than a broken one.
+    """
+    if action is None:
+        return None
+    action_cls = getattr(notify, "Action", None)
+    label = getattr(action, "label", None)
+    callback = getattr(action, "callback", None)
+    if action_cls is None or not label or not callable(callback):
+        return None
+    try:
+        return action_cls(label, callback)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def default_notifier(kind: str, title: str, body: str, action: Any = None) -> None:
     """Send through `smartpanel.notify`, whichever signature it has.
 
-    v2 adds `notify.send(kind, title, body, action=None)`; the v1 function is
-    `send(summary, body, urgency, key)`. The two clash positionally, so look at the
-    parameter names rather than guessing.
+    v2 adds `notify.send(kind, title, body, *, action: Action | None)`; the v1
+    function is `send(summary, body, urgency, key)`. The two clash positionally, so
+    look at the parameter names rather than guessing.
     """
     try:
         from smartpanel import notify
@@ -90,7 +128,7 @@ def default_notifier(kind: str, title: str, body: str, action: Any = None) -> No
         except (TypeError, ValueError):
             params = {}
         if "kind" in params:
-            send(kind, title, body, action=action)
+            send(kind, title, body, action=_to_notify_action(notify, action))
         else:
             send(title, body, urgency="normal", key=kind)
     except Exception:  # noqa: BLE001 — a notification must never break the loop
@@ -257,12 +295,14 @@ class SpendService:
 
     # ── main thread (hand-offs) ──
     def _show_progress(self, done: int, total: int) -> None:
-        if self._scanned or total <= 0:
+        if not self._running or self._scanned or total <= 0:
             return
         self.store.update("app", loading=Loading(done=done, total=total))
 
     def _apply(self, snap: Snapshot, spend, costs: dict[str, float]) -> None:
         self._busy = False
+        if not self._running:
+            return      # stopped while the worker ran: nothing reaches the Store
         self._scanned = True
         self._snapshot = snap
         self._file_costs = costs
@@ -274,6 +314,8 @@ class SpendService:
 
     def _failed(self) -> None:
         self._busy = False
+        if not self._running:
+            return
         if not self._scanned:
             # Don't leave a progress bar up forever after a failed cold scan.
             self.store.update("app", loading=None)
@@ -305,18 +347,28 @@ class SpendService:
         snap = self._snapshot
         if snap is None or snap.now is None:
             return
-        spend = self.store.state.spend
         budget = self._budget()
+        # Check the switch *before* recording thresholds: one crossed while
+        # notifications are off must still fire when they are turned back on.
+        if budget is None or not self._notifications_on():
+            return
+        spend = self.store.state.spend
         kinds = self._alerts.update(spend.cost_today, budget, snap.now.date())
-        if not kinds:
-            return
-        try:
-            enabled = bool(self.config.get("notifications.budget"))
-        except Exception:  # noqa: BLE001
-            enabled = True
-        if not enabled or budget is None:
-            return
         for kind in kinds:
             title, body = budget_message(kind, spend.cost_today or 0.0, budget,
                                          spend.burn_per_hour, snap.now)
-            self._notify(kind, title, body, {"label": "View", "page": "overview"})
+            try:
+                self._notify(kind, title, body, self._view_action())
+            except Exception:  # noqa: BLE001 — a notifier must never break the loop
+                log.warning("budget notification failed: %s", title, exc_info=True)
+
+    def _notifications_on(self) -> bool:
+        try:
+            return bool(self.config.get("notifications.budget"))
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _view_action(self) -> BudgetAction:
+        page = "overview"
+        return BudgetAction("View", page, lambda: self.store.emit(
+            Event("open_dashboard", {"page": page})))
