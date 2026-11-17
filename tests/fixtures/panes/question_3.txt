@@ -1,0 +1,19 @@
+● I need one decision before writing the migration.
+
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Migration
+
+Which migration strategy should I use for 0023?
+
+❯ 1. Down-migrate 0022 first
+     Roll 0022 back on every environment, then apply a single combined
+     migration. Cleanest history, but needs a deploy window.
+  2. Apply on top of the current schema
+     Keep 0022 and add 0023 as a forward-only change. No downtime.
+  3. Skip 0023 for now
+     Ship without the new index and revisit after the release.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

@@ -207,6 +207,33 @@ LIVE_UNAVAILABLE = "unavailable"
 
 _RETRYABLE = {LIVE_NOT_SUBMITTED, LIVE_UNAVAILABLE}
 
+# Indexes into state.JOURNAL_STEPS, reported through a `Progress` callback so
+# the panel can show which step a journaling session is on (SP-1601). The
+# headless route reports the same indexes with `headless=True`, where step 1
+# reads "resume headlessly" instead of "type /journal".
+STEP_WAIT_IDLE, STEP_TYPE, STEP_SKILL, STEP_CLOSE, STEP_RECEIPT = range(5)
+
+# progress(step, *, headless=False, failed=False). Called on the worker thread;
+# the caller bounces it to the main loop.
+Progress = Callable[..., None]
+
+# Outcomes (SP-1602), the same strings as state.OUTCOME_*.
+OUTCOME_JOURNALED = "journaled"
+OUTCOME_SKILL_FAILED = "skill_failed"
+OUTCOME_TIMEOUT = "timeout"
+
+
+@dataclass(frozen=True)
+class JournalResult:
+    outcome: str
+    path: Path | None = None
+    confirmation: str = ""
+    headless: bool = False
+
+    @property
+    def journaled(self) -> bool:
+        return self.outcome == OUTCOME_JOURNALED
+
 
 @dataclass(frozen=True)
 class LiveResult:
@@ -292,14 +319,18 @@ def journal_in_session(session_name: str, transcript: Path,
                        timeout_s: float = CLAUDE_TIMEOUT_S,
                        idle_wait_s: float = LIVE_IDLE_WAIT_S,
                        submit_wait_s: float = LIVE_SUBMIT_WAIT_S,
-                       sleep=time.sleep) -> LiveResult:
+                       sleep=time.sleep,
+                       progress: "Progress | None" = None) -> LiveResult:
     """Type the journal command into the live session and wait for the answer.
 
     Returns the skill's confirmation line on success. The caller kills the
     session only after this returns — that's the whole point of the live path.
+    `progress(step)` is told when each of `state.JOURNAL_STEPS` 0-2 begins.
     """
+    report = progress or (lambda *_a, **_k: None)
     if not tmux.has_session(session_name):
         return LiveResult(LIVE_UNAVAILABLE)
+    report(STEP_WAIT_IDLE)
 
     # 1. Don't interrupt a turn in progress: keys sent mid-turn just pile up in
     #    the input box and would be submitted along with whatever else is there.
@@ -311,6 +342,7 @@ def journal_in_session(session_name: str, transcript: Path,
 
     baseline, _, _ = tail_state(transcript)
     prompt = skill_prompt(project)
+    report(STEP_TYPE)
     log.info("sending %r to session %s", prompt, session_name)
     if not tmux.send_text(session_name, prompt):
         return LiveResult(LIVE_NOT_SUBMITTED)
@@ -334,6 +366,7 @@ def journal_in_session(session_name: str, transcript: Path,
 
     # 3. The command is in, so from here we must never fall back to --resume:
     #    a second run would duplicate the entry in the shared monthly log.
+    report(STEP_SKILL)
     def finished() -> bool:
         count, state, _ = tail_state(transcript)
         return count > baseline and state == "idle"
@@ -465,11 +498,48 @@ def _render_markdown(project: str, cwd, transcript: Path | None, digest: Digest 
     return "\n".join(out) + "\n"
 
 
-def write_journal(project: str, cwd: str | os.PathLike | None,
-                  duration_s: float | None = None, run_skill: bool = True,
-                  session_name: str | None = None,
-                  close_session: Callable[[], None] | None = None) -> Path | None:
-    """Journal the session rooted at `cwd`, then close it.
+FAILED_CONFIRMATION = (f"The {SKILL_COMMAND} skill returned no confirmation line. The session "
+                       "was still closed; this receipt holds the Activity section only.")
+NO_TRANSCRIPT_CONFIRMATION = (f"No transcript was found for this folder, so {SKILL_COMMAND} "
+                              "could not run.")
+
+
+def _front_matter(*, when: datetime, session: str, title: str, project: str,
+                  outcome: str, duration_s: float | None, digest: Digest | None,
+                  confirmation: str, cwd, tmux_name: str | None) -> str:
+    """Machine-readable header for the receipt index (SP-1801).
+
+    YAML between `---` fences, ahead of the unchanged Markdown body, so the
+    file still reads fine in any editor and old receipts keep parsing.
+    """
+    import yaml
+
+    meta = {
+        "time": when.isoformat(timespec="seconds"),
+        "session": session,
+        "tmux": tmux_name or "",
+        "title": title,
+        "project": project,
+        "cwd": str(cwd) if cwd else "",
+        "outcome": outcome,
+        "duration_s": int(duration_s) if duration_s and duration_s > 0 else None,
+        "files": list(digest.files) if digest else [],
+        "commands": [c.splitlines()[0][:200] for c in digest.commands if c.strip()]
+        if digest else [],
+        "tools": dict(digest.tool_counts) if digest else {},
+        "confirmation": confirmation,
+    }
+    body = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True, width=10_000)
+    return f"---\n{body}---\n\n"
+
+
+def run_journal(project: str, cwd: str | os.PathLike | None,
+                duration_s: float | None = None, run_skill: bool = True,
+                session_name: str | None = None,
+                close_session: Callable[[], None] | None = None, *,
+                title: str = "", on_progress: Progress | None = None,
+                journal_dir: Path | None = None) -> JournalResult:
+    """Journal the session rooted at `cwd`, then close it. Returns the outcome.
 
     Two routes to the same skill. If the tmux session is still alive we type the
     command into it and close only once it answers. Otherwise we fall back to
@@ -479,17 +549,36 @@ def write_journal(project: str, cwd: str | os.PathLike | None,
 
     `close_session` is invoked at whichever point is correct for the route
     taken; it is always invoked exactly once, even if journaling fails, so a
-    session can never be left un-closable. Returns the receipt's path.
+    session can never be left un-closable.
+
+    `on_progress(step, headless=, failed=)` reports `state.JOURNAL_STEPS`
+    indexes, always increasing. A failed skill is reported once, on the skill
+    step, and the run then closes and writes the receipt without advancing the
+    step: the UI shows "failed, closing anyway" on the step that failed.
     """
+    def progress(step: int, **kw) -> None:
+        if on_progress is None:
+            return
+        try:
+            on_progress(step, **kw)
+        except Exception as e:  # noqa: BLE001 — a UI hiccup must not stop the close
+            log.debug("journal progress callback failed: %s", e)
+
     when = datetime.now()
     transcript = find_transcript(cwd) if cwd else None
     skill_result: str | None = None
     live = LiveResult(LIVE_UNAVAILABLE)
+    headless = False
+    failed = False
 
+    progress(STEP_WAIT_IDLE)
     if run_skill and transcript and session_name:
         with _SKILL_LOCK:  # the skill appends to one shared monthly file
-            live = journal_in_session(session_name, transcript, project)
+            live = journal_in_session(session_name, transcript, project,
+                                      progress=progress)
         skill_result = live.text
+        if live.ok:
+            progress(STEP_CLOSE)
 
     if close_session is not None:
         try:
@@ -501,51 +590,103 @@ def write_journal(project: str, cwd: str | os.PathLike | None,
     # timeout the skill may still be running in there; a second pass would
     # append a duplicate entry.
     if run_skill and transcript and live.retryable:
+        headless = True
+        progress(STEP_TYPE, headless=True)
+        progress(STEP_SKILL, headless=True)
         skill_result = run_journal_skill(session_id_of(transcript), cwd, project)
+        if skill_result:
+            progress(STEP_CLOSE, headless=True)
     elif live.status == LIVE_TIMEOUT:
         skill_result = (f"_(`{SKILL_COMMAND}` was submitted to the live session but "
                         f"had not finished after {CLAUDE_TIMEOUT_S}s.)_")
 
+    if live.status == LIVE_TIMEOUT:
+        outcome, failed = OUTCOME_TIMEOUT, True
+        confirmation = (f"{SKILL_COMMAND} was submitted to the live session but had not "
+                        f"finished after {CLAUDE_TIMEOUT_S}s.")
+    elif live.ok or (headless and skill_result):
+        outcome, confirmation = OUTCOME_JOURNALED, (skill_result or "").strip()
+    else:
+        outcome, failed = OUTCOME_SKILL_FAILED, True
+        confirmation = (FAILED_CONFIRMATION if transcript or not run_skill
+                        else NO_TRANSCRIPT_CONFIRMATION)
+    if failed:
+        progress(STEP_SKILL, headless=headless, failed=True)
+
     # Condensed after the close so the receipt covers the whole session,
     # including the journal turn itself.
     digest = condense(transcript) if transcript else None
+    if not failed:
+        progress(STEP_RECEIPT, headless=headless)
 
-    JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
-    path = JOURNAL_DIR / f"{when:%Y%m%d-%H%M%S}-{_safe(project)}.md"
+    directory = journal_dir or JOURNAL_DIR
+    path: Path | None = directory / f"{when:%Y%m%d-%H%M%S}-{_safe(project)}.md"
     try:
+        directory.mkdir(parents=True, exist_ok=True)
+        header = _front_matter(
+            when=when, session=session_id_of(transcript) if transcript else "",
+            title=title, project=project, outcome=outcome, duration_s=duration_s,
+            digest=digest, confirmation=confirmation, cwd=cwd, tmux_name=session_name)
         path.write_text(
-            _render_markdown(project, cwd, transcript, digest, duration_s, when,
-                             skill_result),
+            header + _render_markdown(project, cwd, transcript, digest, duration_s,
+                                      when, skill_result),
             encoding="utf-8",
         )
-    except OSError as e:
+        log.info("wrote journal %s", path)
+    except Exception as e:  # noqa: BLE001 — OSError, or YAML on odd input
         log.warning("failed to write journal %s: %s", path, e)
-        return None
-    log.info("wrote journal %s", path)
-    return path
+        path = None
+    return JournalResult(outcome, path, confirmation, headless)
+
+
+def write_journal(project: str, cwd: str | os.PathLike | None,
+                  duration_s: float | None = None, run_skill: bool = True,
+                  session_name: str | None = None,
+                  close_session: Callable[[], None] | None = None, *,
+                  title: str = "", on_progress: Progress | None = None) -> Path | None:
+    """`run_journal`, returning just the receipt's path (the original API)."""
+    return run_journal(project, cwd, duration_s, run_skill, session_name,
+                       close_session, title=title, on_progress=on_progress).path
 
 
 def write_journal_async(project: str, cwd: str | os.PathLike | None,
                         duration_s: float | None = None, run_skill: bool = True,
                         session_name: str | None = None,
                         close_session: Callable[[], None] | None = None,
-                        on_done: Callable[[Path | None], None] | None = None) -> None:
-    """Generate the journal on a daemon thread (the skill run is slow)."""
+                        on_done: Callable[[Path | None], None] | None = None, *,
+                        title: str = "", on_progress: Progress | None = None,
+                        on_result: Callable[[JournalResult], None] | None = None,
+                        journal_dir: Path | None = None) -> threading.Thread:
+    """Generate the journal on a daemon thread (the skill run is slow).
+
+    Callbacks run on that thread: GTK callers bounce them with GLib.idle_add.
+    `on_done(path)` is the original API; `on_result(JournalResult)` carries the
+    outcome and confirmation line as well. Both fire exactly once, even when
+    journaling blew up (then as `skill_failed` with no receipt path).
+    """
     once = _once(close_session)
 
     def run() -> None:
-        p = None
+        result = JournalResult(OUTCOME_SKILL_FAILED, None, FAILED_CONFIRMATION)
         try:
-            p = write_journal(project, cwd, duration_s, run_skill,
-                              session_name, once)
+            result = run_journal(project, cwd, duration_s, run_skill, session_name,
+                                 once, title=title, on_progress=on_progress,
+                                 journal_dir=journal_dir)
         except Exception as e:  # noqa: BLE001 — never let the worker thread die loudly
             log.warning("journal generation failed for %s: %s", project, e)
         finally:
-            # write_journal normally owns the close; if it raised before getting
+            # run_journal normally owns the close; if it raised before getting
             # there the session would be stranded, so backstop it here. `_once`
             # makes the second call a no-op.
             once()
-        if on_done is not None:
-            on_done(p)
+        for cb, arg in ((on_done, result.path), (on_result, result)):
+            if cb is None:
+                continue
+            try:
+                cb(arg)
+            except Exception as e:  # noqa: BLE001
+                log.warning("journal callback failed for %s: %s", project, e)
 
-    threading.Thread(target=run, name="smartpanel-journal", daemon=True).start()
+    t = threading.Thread(target=run, name="smartpanel-journal", daemon=True)
+    t.start()
+    return t

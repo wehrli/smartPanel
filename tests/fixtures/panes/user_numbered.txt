@@ -1,0 +1,12 @@
+❯ 1. fix the parser so it keeps the cursor row
+  2. add a fixture for the trust prompt
+  3. then run the whole suite
+
+● I'll do those in order, starting with the parser.
+
+✻ Brewed for 2m 4s · done 3:40 PM
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)

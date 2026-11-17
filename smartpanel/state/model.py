@@ -201,6 +201,7 @@ class JournalProgress:
     step: int = 0                        # index into JOURNAL_STEPS currently running
     failed: bool = False                 # the skill failed; the session still closes
     outcome: str | None = None           # OUTCOME_* once finished
+    headless: bool = False               # fallback route: step 1 reads "Resume the session headlessly"
 
 
 @dataclass
@@ -230,6 +231,7 @@ class SessionsState:
     tmux_ok: bool = True
     terminal_ok: bool = True
     updated_at: float | None = None
+    close_all: "Loading | None" = None   # "Close all" in flight: done of total sessions
 
     def count(self, activity: str) -> int:
         return sum(1 for s in self.items if s.activity == activity)
@@ -300,12 +302,16 @@ class Event:
     """One-shot feedback that is not state: toasts, dialogs to open, navigation.
 
     kind:
-      "toast"          data: {text, error: bool, action: {label, page} | None}
+      "toast"          data: {text, error: bool, action: {label, page, focus?} | None}
+                       action.focus (optional): a session name the UI should
+                       also focus (Controller.focus_session) when clicked
       "confirm_close"  data: {name}            -> UI opens the journal-confirm dialog
-      "confirm_close_all" data: {}
+      "confirm_close_all" data: {count, journaled}
+                       count: sessions to close; journaled: how many get a journal
       "open_dashboard" data: {page}            -> page may be "journal:<id>", "sessions:board"
       "open_palette"   data: {}
       "new_session"    data: {}                -> UI opens the folder picker
+      "quit"           data: {}                -> app stops the Controller and quits
     """
     kind: str
     data: dict = field(default_factory=dict)

@@ -1,0 +1,19 @@
+←  ☐ Cache scope  ☐ Expiry  ☐ Commit  ✔ Submit  →
+
+The cache currently keeps every response. How aggressive should eviction
+be?
+
+❯ 1. Evict by age, keep pinned entries (Recommended)
+     entries.body -> dropped after 24h, entries.meta -> kept (cheap to hold
+     and needed by the index).
+  2. Evict pinned entries too
+     Everything above plus pinned entries after 7 days.
+  3. Evict by size (LRU, 512 MB cap)
+     Age doesn't matter, only the total footprint.
+  4. Leave the cache as specced
+     Ship what's implemented and tested now. Memory is not a problem yet.
+  5. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

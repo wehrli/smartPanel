@@ -1,0 +1,11 @@
+  Both reviewers are running now; I'll merge their findings when they land.
+
+✻ Waiting for 2 background agents to finish
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle) · ← 2 agents · ↓ to manage
+  ● main
+  ◯ general-purpose  Reviewing smartpanel/sessions/prompt.py        1m 12s · ↓ 31.4k
+  ◯ general-purpose  Reviewing smartpanel/services/controller.py    1m 09s · ↓ 28.0k

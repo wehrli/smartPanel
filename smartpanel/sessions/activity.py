@@ -55,6 +55,9 @@ TAIL_LINES = 30
 # "· esc to interrupt", or "✻ Waiting for 2 background agents to finish" when
 # the main turn is done but agents are not.
 _RUNNING_MARKERS = ("esc to interrupt", "background agent")
+# The same idle-but-not-done line for other kinds of background work, e.g.
+# "✻ Waiting for 1 dynamic workflow to finish" (real capture).
+_WAITING_FOR = re.compile(r"waiting for \d+ [a-z][\w -]*? to finish")
 
 # The hint line under any modal Claude Code puts up: "Enter to confirm · Esc to
 # cancel" on a permission or trust prompt, "Enter to select · Tab/Arrow keys to
@@ -96,7 +99,7 @@ def classify_pane(text: str, tail_lines: int = TAIL_LINES) -> str:
     if _has_confirm_footer(tail) or _has_choice_box(tail):
         return WAITING
     lowered = "\n".join(tail).lower()
-    if any(m in lowered for m in _RUNNING_MARKERS):
+    if any(m in lowered for m in _RUNNING_MARKERS) or _WAITING_FOR.search(lowered):
         return RUNNING
     return IDLE
 
@@ -114,16 +117,44 @@ def _has_confirm_footer(lines: Sequence[str]) -> bool:
     return any(_OPTION_CURSOR.match(line) for line in lines)
 
 
+# A horizontal rule: the input box is drawn between two of these.
+_RULE = re.compile(r"^\s*[─━═╌-]{10,}\s*$")
+# The empty input box ("❯" alone) and an assistant bullet: neither is ever drawn
+# *below* a live choice list, because a modal replaces the input area.
+_BARE_PROMPT = re.compile(r"^\s*[❯>]\s*$")
+_BULLET = re.compile(r"^[●⏺]\s")  # column 0: the agents list indents its own ●
+
+
+def is_rule(line: str) -> bool:
+    return bool(_RULE.match(line))
+
+
 def _has_choice_box(lines: Sequence[str]) -> bool:
-    cursor = False
+    cursor_at = -1
     numbers: set[str] = set()
-    for line in lines:
+    for i, line in enumerate(lines):
         if _CHOICE_CURSOR.match(line):
-            cursor = True
+            cursor_at = i
         m = _CHOICE_OPTION.match(line)
         if m:
             numbers.add(m.group(1))
-    return cursor and len(numbers) >= _MIN_CHOICES
+    if cursor_at < 0 or len(numbers) < _MIN_CHOICES:
+        return False
+    return not _is_user_text(lines, cursor_at)
+
+
+def _is_user_text(lines: Sequence[str], cursor_at: int) -> bool:
+    """True when a "❯ 1. …" list is the user's own words, not a choice box.
+
+    Two shapes, both from real panes: a submitted message is echoed as
+    "❯ 1. fix …" and Claude's answer plus a fresh input box follow it; a draft
+    still in the input box sits directly under the box's top rule. A live modal
+    replaces the input area, so neither can happen under a real prompt.
+    """
+    if cursor_at > 0 and is_rule(lines[cursor_at - 1]):
+        return True
+    return any(_BARE_PROMPT.match(line) or _BULLET.match(line)
+               for line in lines[cursor_at + 1:])
 
 
 def activity_of(name: str, run: Runner = _run) -> str:

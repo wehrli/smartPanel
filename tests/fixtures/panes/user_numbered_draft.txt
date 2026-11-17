@@ -1,0 +1,9 @@
+● Done. All 185 tests pass.
+
+✻ Brewed for 12s · done 3:41 PM
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 1. now add the receipts index
+  2. then the controller
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)
