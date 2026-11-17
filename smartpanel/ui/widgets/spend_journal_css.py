@@ -67,7 +67,6 @@ _CSS = """
 .sj-quote.sj-failed { border-left-color: var(--sp-level-crit); }
 .sj-dt { color: var(--sp-muted); }
 .sj-dd { font-family: var(--sp-mono); font-size: 0.92em; }
-.sj-btns > flowboxchild { padding: 0; }
 .sj-path { font-family: var(--sp-mono); font-size: 0.88em; color: var(--sp-muted); }
 """
 

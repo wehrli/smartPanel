@@ -9,8 +9,9 @@
 While the first transcript scan runs (`app.loading`) the page shows a progress
 state instead; with no transcripts at all (`app.first_run`) an empty state with
 **New session**. The page subscribes to the store once and updates in place:
-labels are re-set only when their text changes and the day selection (by date)
-survives every tick.
+labels are re-set only when their text changes. The day selection follows Today
+(also across midnight) until the user picks another day, which is then kept by
+date across ticks; reopening the window goes back to Today.
 
 API (fixed for every page): build(store, actions, config) -> Gtk.Widget
 """
@@ -32,6 +33,7 @@ from smartpanel.ui.widgets.spend_journal_receipt import Receipt  # noqa: E402
 
 DAY_LIST_WIDTH = 200
 STACK_BELOW = 560       # px of the day-list + receipt area
+HEAD_TWO_BELOW = 640    # px: below this the header cards go 2+2, never 3+1
 NARROW_MIN = 280
 _WATCH = {"spend", "app", "settings"}
 
@@ -145,6 +147,10 @@ class SpendPage(Gtk.Stack):
         sjcss.install()
         self.store, self.actions, self.config = store, actions, config
         self._selected_date: str | None = None
+        # True until the user picks another day: the selection then follows
+        # Today across midnight (the window is hide-on-close and lives for days).
+        self._follow_today = True
+        self._pending_date: str | None = None    # a route that arrived early
         self._syncing = False
         self._rows: list[DayRowWidget] = []
 
@@ -155,6 +161,23 @@ class SpendPage(Gtk.Stack):
 
         self._unsubscribe = store.subscribe(self._on_change)
         self.connect("destroy", lambda *_: self._unsubscribe())
+        self._routed = False          # a route picked the day since the last map
+        self._window_closed = False   # the window was hidden since the last map
+        self.connect("map", self._on_map)
+        self.connect("unmap", self._on_unmap)
+        self.refresh()
+
+    def _on_unmap(self, *_a) -> None:
+        root = self.get_root()
+        # Hidden with the window (not just another page shown in the stack).
+        self._window_closed = root is None or not root.get_visible()
+
+    def _on_map(self, *_a) -> None:
+        # Reopening the dashboard lands on Today (SP-1003); switching pages
+        # keeps the picked day, and so does a route that chose one.
+        if self._window_closed and not self._routed and self._pending_date is None:
+            self._follow_today = True
+        self._window_closed = self._routed = False
         self.refresh()
 
     # ── states ──
@@ -203,6 +226,7 @@ class SpendPage(Gtk.Stack):
                            min_children_per_line=2, max_children_per_line=4,
                            column_spacing=14, row_spacing=14)
         head.set_can_focus(False)
+        self.head = head
         self.card_today = HeadCard("Today")
         self.card_week = HeadCard("This week")
         self.card_life = HeadCard("Lifetime")
@@ -241,6 +265,10 @@ class SpendPage(Gtk.Stack):
         bp.add_setter(recv, "orientation", Gtk.Orientation.VERTICAL)
         bp.add_setter(days_card, "valign", Gtk.Align.FILL)
         bin_.add_breakpoint(bp)
+        # Four cards in a row, or 2+2 — never 3+1 (the prototype's .spendhead).
+        bp2 = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(f"max-width: {HEAD_TWO_BELOW}px"))
+        bp2.add_setter(head, "max-children-per-line", 2)
+        bin_.add_breakpoint(bp2)
         self.add_named(bin_, "main")
 
     # ── store ──
@@ -290,7 +318,11 @@ class SpendPage(Gtk.Stack):
                 self.days.remove(self._rows.pop())
             for w, r in zip(self._rows, rows):
                 w.set_row(r)
-            idx = m.pick_day(days, self._selected_date)
+            if self._pending_date is not None and any(
+                    d.date == self._pending_date for d in days):
+                self._selected_date, self._pending_date = self._pending_date, None
+                self._follow_today = False
+            idx = 0 if self._follow_today else m.pick_day(days, self._selected_date)
             if self.days.get_selected_row() is not self._rows[idx]:
                 self.days.select_row(self._rows[idx])
             self._selected_date = days[idx].date
@@ -305,6 +337,8 @@ class SpendPage(Gtk.Stack):
         idx = row.get_index()
         if 0 <= idx < len(days):
             self._selected_date = days[idx].date
+            self._follow_today = idx == 0
+            self._pending_date = None
             self._update_receipt()
 
     def _update_receipt(self) -> None:
@@ -325,10 +359,18 @@ class SpendPage(Gtk.Stack):
         return self._selected_date
 
     def select_date(self, iso: str) -> bool:
+        """Select the day `iso`; if it isn't listed yet (first scan still
+        running, or the day hasn't arrived), select it when it does."""
+        self._routed = True
         for i, d in enumerate(self.store.state.spend.days):
             if d.date == iso and i < len(self._rows):
+                self._pending_date = None
+                self._follow_today = i == 0
+                self._selected_date = iso
                 self.days.select_row(self._rows[i])
+                self._update_receipt()
                 return True
+        self._pending_date = iso
         return False
 
 

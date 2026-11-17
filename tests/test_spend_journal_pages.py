@@ -96,6 +96,55 @@ def test_spend_row_click_changes_receipt():
     assert page.receipt.model.date_line.endswith(str(int(store.state.spend.days[1].date[:4])))
 
 
+def test_spend_selection_follows_today_across_midnight():
+    import dataclasses
+    _mod, store, _a, page = _spend()
+    old = list(store.state.spend.days)
+    new_today = dataclasses.replace(old[0], date="2026-11-18", label="Today", cost_usd=1.0)
+    yesterday = dataclasses.replace(old[0], label="Yesterday")
+    store.update("spend", days=[new_today, yesterday] + old[1:13], cost_today=1.0)
+    assert page.selected_date == "2026-11-18"
+    assert page.receipt.model.date_line.startswith("WED 18 NOV 2026")
+
+
+def test_spend_picked_day_is_kept_until_reopened():
+    import dataclasses
+    _mod, store, _a, page = _spend()
+    old = list(store.state.spend.days)
+    page.days.select_row(page._rows[2])
+    picked = old[2].date
+    store.update("spend", days=[dataclasses.replace(old[0], date="2026-11-18")] + old[:13])
+    assert page.selected_date == picked              # the user's pick survives
+    page._window_closed = True                       # window hidden, then reopened
+    page._on_map()
+    assert page.selected_date == "2026-11-18"
+
+
+def test_spend_route_during_loading_applies_when_loaded():
+    mod, store, _a, page = _spend("cold")
+    from smartpanel.demo.scenarios import loaded_spend
+    loaded = loaded_spend()
+    target = loaded.days[3].date
+    mod.show_detail(page, target)                    # not listed yet: remembered
+    with store.batch():
+        store.replace("spend", loaded)
+        store.update("app", loading=None)
+    assert page.selected_date == target
+
+
+def test_receipt_updates_in_place_on_a_tick():
+    _mod, store, _a, page = _spend()
+    rebuilds = page.receipt.rebuilds
+    total_label = page.receipt.labels["total"]
+    days = list(store.state.spend.days)
+    import dataclasses
+    days[0] = dataclasses.replace(days[0], cost_usd=days[0].cost_usd + 1.25)
+    store.update("spend", days=days, updated_at=(store.state.spend.updated_at or 0) + 60)
+    assert page.receipt.rebuilds == rebuilds         # same shape: no rebuild
+    assert page.receipt.labels["total"] is total_label
+    assert total_label.get_text() == page.receipt.model.total
+
+
 def test_spend_budget_lines_hidden_without_budget():
     _mod, store, _a, page = _spend()
     store.state.spend.forecast.budget_usd = None
@@ -179,6 +228,16 @@ def test_journal_open_buttons_follow_file_existence(tmp_path):
     page.detail.open_receipt.emit("clicked")
     assert opened == [str(receipt)] and toasts and toasts[0].data["error"]
     assert not page.detail.open_receipt.get_sensitive()
+
+
+def test_journal_log_button_enables_when_log_appears(tmp_path):
+    log_file = tmp_path / "2026-11.md"
+    _mod, store, page = _journal()
+    store.update("journal", monthly_log_path=str(log_file))
+    assert not page.detail.open_log.get_sensitive()
+    log_file.write_text("x")
+    store.touch("journal")                           # any journal change re-stats
+    assert page.detail.open_log.get_sensitive()
 
 
 def test_journal_unreadable_entry():

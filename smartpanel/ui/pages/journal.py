@@ -152,11 +152,11 @@ class Detail(Gtk.Box):
         self.path.set_attributes(attrs)
         self.append(self.path)
 
-        # FlowBox: the second button wraps under the first in a narrow card.
-        buttons = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=False,
-                              min_children_per_line=1, max_children_per_line=2,
-                              column_spacing=8, row_spacing=8, halign=Gtk.Align.START)
+        # Side by side; the labels ellipsize rather than wrap the row. The page
+        # stacks them (vertical) in its narrow layout.
+        buttons = Gtk.Box(spacing=8, halign=Gtk.Align.START)
         buttons.set_margin_top(2)
+        self.buttons = buttons
         buttons.add_css_class("sj-btns")
         self.open_receipt = Gtk.Button(child=_ellipsizing("Open receipt"))
         self.open_receipt.connect("clicked", lambda *_: self._open("receipt"))
@@ -165,7 +165,6 @@ class Detail(Gtk.Box):
         for b in (self.open_receipt, self.open_log):
             buttons.append(b)
             b.set_halign(Gtk.Align.START)
-            b.get_parent().set_can_focus(False)   # focus the button, not its slot
         self.append(buttons)
 
         self.detail: m.JournalDetail | None = None
@@ -259,6 +258,8 @@ class JournalPage(Gtk.Stack):
 
         self._unsubscribe = store.subscribe(self._on_change)
         self.connect("destroy", lambda *_: self._unsubscribe())
+        # Reopened: 'today'/'yesterday' and the files' existence may be stale.
+        self.connect("map", lambda *_: self.refresh())
         self.refresh()
 
     def _relayout(self, grid: Gtk.Grid, list_card: Gtk.Widget, *, narrow: bool) -> None:
@@ -266,6 +267,8 @@ class JournalPage(Gtk.Stack):
         grid.remove(self.detail)
         grid.attach(self.detail, 0 if narrow else 1, 1 if narrow else 0, 1, 1)
         list_card.set_size_request(-1 if narrow else LIST_WIDTH, -1)
+        self.detail.buttons.set_orientation(
+            Gtk.Orientation.VERTICAL if narrow else Gtk.Orientation.HORIZONTAL)
         self.narrow = narrow
 
     # ── store ──
@@ -282,6 +285,9 @@ class JournalPage(Gtk.Stack):
             self.empty.set_text(m.journal_empty_text(min_age, journal_on))
             self._show("empty")
             return
+        # Re-stat on every change: the monthly log or the receipt may have
+        # appeared since the entry was first shown (two stats, cheap).
+        self._exist_cache = (None, False, False)
         self._sync_rows(entries)
         self._show("main")
 

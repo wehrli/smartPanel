@@ -3,8 +3,10 @@ SP-1102, SP-1103).
 
 Paper look in mono type on off-white (in both modes), with dashed rules and a
 scalloped bottom edge drawn with cairo. `set_model(ReceiptModel)` is a no-op
-when the model is unchanged, so the page can call it on every store tick; when
-it does change only the receipt's own labels are rebuilt.
+when the model is unchanged, so the page can call it on every store tick. When
+only values change (Today's time and total move on every spend tick) the
+existing labels are re-texted in place; the rows are rebuilt only when the
+receipt's shape changes (another number of lines, a section appearing).
 """
 from __future__ import annotations
 
@@ -80,7 +82,10 @@ class Receipt(Gtk.Box):
         self._note.set_visible(False)
         self.append(self._note)
         self._model: ReceiptModel | None = None
+        self._shape: tuple | None = None
         self.labels: dict[str, Gtk.Label] = {}   # role -> label, for tests / a11y
+        self._rows: dict[str, Gtk.Box] = {}      # role -> line, for its a11y label
+        self.rebuilds = 0                        # structural rebuilds (tests)
 
     # ── drawing ──
     def _draw(self, _area, cr, width: int, height: int) -> None:
@@ -128,6 +133,7 @@ class Receipt(Gtk.Box):
         if role:
             self.labels[role] = lab_r
             self.labels[role + ".label"] = lab_l
+            self._rows[role] = row
         if tooltip:
             row.set_tooltip_text(tooltip)
         row.update_property([Gtk.AccessibleProperty.LABEL], [f"{left.strip()} {right}"])
@@ -139,11 +145,67 @@ class Receipt(Gtk.Box):
         sep.add_css_class("sj-dash")
         self._content.append(sep)
 
+    @staticmethod
+    def _shape_of(model: ReceiptModel) -> tuple:
+        return (model.empty, len(model.projects), len(model.models),
+                model.praise is None, model.echo is None, model.budget is None,
+                model.budget_rest is None)
+
     def set_model(self, model: ReceiptModel) -> None:
         if model == self._model:
             return
+        shape = self._shape_of(model)
         self._model = model
+        if shape == self._shape:
+            self._patch(model)
+        else:
+            self._shape = shape
+            self._build(model)
+        self._note.set_visible(not model.empty and model.has_praise)
+        self._sync_a11y()
+
+    def _set(self, role: str, text: str) -> None:
+        lab = self.labels.get(role)
+        if lab is not None and lab.get_text() != text:
+            lab.set_text(text)
+
+    def _set_line(self, role: str, left: str, right: str) -> None:
+        self._set(role + ".label", left)
+        self._set(role, right)
+        row = self._rows.get(role)
+        if row is not None:
+            row.update_property([Gtk.AccessibleProperty.LABEL], [f"{left.strip()} {right}"])
+
+    def _patch(self, model: ReceiptModel) -> None:
+        """Same shape as what's on screen: re-text the values only."""
+        self._set("date", model.date_line)
+        if model.empty:
+            return
+        for i, (name, amt) in enumerate(model.projects):
+            self._set_line(f"project.{i}", name, amt)
+        for i, (name, amt) in enumerate(model.models):
+            self._set_line(f"model.{i}", f" {name}", amt)
+        self._set_line("total", "TOTAL USD", model.total)
+        if model.praise is not None:
+            self._set_line("praise", "incl. compliments", model.praise)
+        if model.echo is not None:
+            self._set_line("echo", "  echo of them later", model.echo)
+        if model.budget is not None:
+            self._set_line("budget", "daily budget", model.budget)
+        if model.budget_rest is not None:
+            label, amt = model.budget_rest
+            self._set_line("rest", label, amt)
+            new, old = ("sj-tip", "sj-m") if model.over else ("sj-m", "sj-tip")
+            for lab in (self.labels.get("rest"), self.labels.get("rest.label")):
+                if lab is not None and not lab.has_css_class(new):
+                    lab.remove_css_class(old)
+                    lab.add_css_class(new)
+        self._set("footer", model.footer)
+
+    def _build(self, model: ReceiptModel) -> None:
+        self.rebuilds += 1
         self.labels = {}
+        self._rows = {}
         child = self._content.get_first_child()
         while child is not None:
             nxt = child.get_next_sibling()
@@ -157,8 +219,6 @@ class Receipt(Gtk.Box):
             empty = self._center("NO USAGE THIS DAY", "sj-m", role="empty")
             empty.set_margin_top(18)
             empty.set_margin_bottom(18)
-            self._note.set_visible(False)
-            self._sync_a11y()
             return
         for i, (name, amt) in enumerate(model.projects):
             self._line(name, amt, role=f"project.{i}")
@@ -182,8 +242,6 @@ class Receipt(Gtk.Box):
                 self._line(label, amt, "sj-tip" if model.over else "sj-m", role="rest")
         foot = self._center(model.footer, "sj-m", role="footer")
         foot.set_margin_top(8)
-        self._note.set_visible(model.has_praise)
-        self._sync_a11y()
 
     def _sync_a11y(self) -> None:
         m = self._model
