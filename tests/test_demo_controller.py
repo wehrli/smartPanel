@@ -351,6 +351,7 @@ def test_retitle_toasts_after_delay():
     assert rec.toasts() == []
     sched.advance(700)
     assert rec.last_toast()["text"] == "Title re-read from tmux"
+    assert [e.data for e in rec.events if e.kind == "retitled"] == [{"name": LEDGERLY}]
 
 
 # ── settings ──

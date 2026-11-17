@@ -153,6 +153,8 @@ def test_focus_result_is_reported_even_when_nothing_is_tried(h):
 def test_retitle(h):
     h.ctl.retitle_session("claude-webapp")
     assert h.toasts()[-1]["text"] == "Title re-read from tmux"
+    retitled = [e.data for e in h.events if e.kind == "retitled"]
+    assert retitled == [{"name": "claude-webapp"}]
 
 
 # ── close (SP-1609) ──

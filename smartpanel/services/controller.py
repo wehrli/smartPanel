@@ -226,6 +226,7 @@ class Controller:
         if s is None or self._busy(s):
             return
         self.sessions.retitle(name)
+        self.store.emit(Event("retitled", {"name": name}))
         self.store.toast("Title re-read from tmux")
 
     # ── files ──

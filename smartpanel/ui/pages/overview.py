@@ -34,7 +34,6 @@ AGE_TICK_S = 20                # session ages / waiting times, only while mapped
 NARROW = "max-width: 620sp"
 MID = "max-width: 760sp"         # metric grid goes 2x2 here: never 3+1
 RIGHT_W = 270                  # right column: fixed, so the split never shifts
-RETITLE_TOAST = "Title re-read from tmux"
 
 
 def build(store, actions, config=None):
@@ -50,7 +49,6 @@ class OverviewPage(Adw.BreakpointBin):
         self._rows: dict[str, SessionRow] = {}
         self._order: dict[str, int] = {}
         self._needs: dict[str, NeedsRow] = {}
-        self._retitle_pending: list[str] = []      # FIFO of retitles awaiting their toast
         self._tick = 0
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -259,14 +257,11 @@ class OverviewPage(Adw.BreakpointBin):
             self._update_sessions()
 
     def _on_event(self, event) -> None:
-        # The toast carries no session name (see notes), so match it to the
-        # oldest retitle still in flight rather than clearing every spinner.
-        if event.kind == "toast" and (event.data or {}).get("text") == RETITLE_TOAST:
-            while self._retitle_pending:
-                row = self._rows.get(self._retitle_pending.pop(0))
-                if row is not None and row.retitling:
-                    row.retitle_done()
-                    break
+        # A ⟳ ends on the controller's "retitled" Event, which names the session.
+        if event.kind == "retitled":
+            row = self._rows.get(str((event.data or {}).get("name") or ""))
+            if row is not None and row.retitling:
+                row.retitle_done()
 
     @property
     def state(self) -> PanelState:
@@ -395,9 +390,6 @@ class OverviewPage(Adw.BreakpointBin):
         self.actions.focus_session(name)
 
     def _retitle(self, name: str) -> None:
-        if name in self._retitle_pending:
-            self._retitle_pending.remove(name)
-        self._retitle_pending.append(name)
         self.actions.retitle_session(name)
 
     def _close(self, name: str) -> None:

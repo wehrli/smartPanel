@@ -272,6 +272,7 @@ class DemoController:
 
         def done() -> None:
             if self._find(name) is not None:
+                self.store.emit(Event("retitled", {"name": name}))
                 self.store.toast("Title re-read from tmux")
         self._after(RETITLE_MS, done)
 

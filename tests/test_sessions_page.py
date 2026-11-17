@@ -19,7 +19,7 @@ except (ImportError, ValueError):  # pragma: no cover
 pytestmark = pytest.mark.skipif(not _DISPLAY, reason="needs GTK 4 and a display")
 
 from smartpanel import demo  # noqa: E402
-from smartpanel.state import Store  # noqa: E402
+from smartpanel.state import Event, Store  # noqa: E402
 from smartpanel.state.model import (IDLE, PHASE_JOURNALING, PHASE_LAUNCHING,  # noqa: E402
                                     PHASE_NONE, RUNNING, UNKNOWN, WAITING, JournalProgress,
                                     Loading, Session)
@@ -204,6 +204,10 @@ def test_retitle_spinner_until_toast():
     assert card.retitling and not card.retitle_btn.get_sensitive()
     card._retitle_started -= 10_000           # pretend the minimum time has passed
     store.toast("Title re-read from tmux")
+    assert card.retitling                     # the toast alone doesn't end it
+    store.emit(Event("retitled", {"name": "claude-other"}))
+    assert card.retitling
+    store.emit(Event("retitled", {"name": "claude-ledgerly"}))
     assert not card.retitling and card.retitle_btn.get_sensitive()
 
 

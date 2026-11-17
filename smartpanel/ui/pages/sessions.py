@@ -44,13 +44,9 @@ log = logging.getLogger(__name__)
 
 SCROLLS = True          # the page owns its scrollers (board columns scroll on their own)
 AGE_TICK_S = 15
-RETITLE_TOAST = "Title re-read from tmux"
-
-
-def retitle_outcome_for(text: str, error: bool, name: str, title: str) -> bool:
-    """Does a toast answer a ⟳ Title on session `name` (shown as `title`)?"""
-    if text == RETITLE_TOAST:
-        return True
+def retitle_failed_for(text: str, error: bool, name: str, title: str) -> bool:
+    """Does an error toast answer a ⟳ Title on session `name` (shown as `title`)?
+    Success arrives as the "retitled" Event instead."""
     return error and any(k and k in text for k in (name, title))
 
 
@@ -233,17 +229,22 @@ class SessionsPage(Gtk.Box):
             self.refresh()
 
     def _on_event(self, event) -> None:
-        if event.kind != "toast":
-            return
-        # Only the re-title outcome ends a ⟳ in flight: the controller answers
-        # with "Title re-read from tmux", or with an error toast naming the
-        # session. Unrelated toasts (answers, journals, copies) are ignored;
+        # Only the re-title outcome ends a ⟳ in flight: the controller's
+        # "retitled" Event naming the session, or an error toast naming it.
+        # Unrelated toasts (answers, journals, copies) are ignored;
         # RETITLE_MAX_MS is the backstop when no outcome ever arrives.
         data = event.data or {}
+        if event.kind == "retitled":
+            card = self.cards.get(str(data.get("name") or ""))
+            if card is not None and card.retitling:
+                card.retitle_done()
+            return
+        if event.kind != "toast":
+            return
         text = str(data.get("text") or "")
         for name, card in self.cards.items():
-            if card.retitling and retitle_outcome_for(text, bool(data.get("error")),
-                                                      name, card.title.get_text()):
+            if card.retitling and retitle_failed_for(text, bool(data.get("error")),
+                                                     name, card.title.get_text()):
                 card.retitle_done()
 
     def _ctx(self) -> CardContext:

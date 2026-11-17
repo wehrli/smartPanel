@@ -273,7 +273,10 @@ def test_overview_actions_go_through_actions():
     row.close_button.emit("clicked")
     row.retitle_button.emit("clicked")
     assert row.retitling
-    store.emit(Event("toast", {"text": "Title re-read from tmux"}))
+    settled = []
+    row.retitle_done = lambda: settled.append(name)
+    store.emit(Event("retitled", {"name": name}))
+    assert settled == [name]
     next(iter(page._needs.values())).button.emit("clicked")
     page.budget_link.emit("clicked")
     assert ("focus_session", (name,)) in actions.calls
@@ -285,16 +288,20 @@ def test_overview_actions_go_through_actions():
 
 
 @needs_display
-def test_retitle_toast_only_settles_the_oldest_pending_row():
+def test_retitled_event_only_settles_its_own_row():
     store, actions, page = _overview("busy")
     (a, ra), (b, rb) = list(page._rows.items())[:2]
     ra.retitle_button.emit("clicked")
     rb.retitle_button.emit("clicked")
-    assert page._retitle_pending == [a, b]
+    settled = []
+    ra.retitle_done = lambda: settled.append(a)
+    rb.retitle_done = lambda: settled.append(b)
     store.emit(Event("toast", {"text": "Title re-read from tmux"}))
-    assert page._retitle_pending == [b]           # b's spinner is still in flight
-    store.emit(Event("toast", {"text": "Closed."}))
-    assert page._retitle_pending == [b]
+    assert settled == []                          # toast text is no longer matched
+    store.emit(Event("retitled", {"name": b}))
+    assert settled == [b]
+    store.emit(Event("retitled", {"name": a}))
+    assert settled == [b, a]
     page.dispose_page()
 
 

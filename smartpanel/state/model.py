@@ -312,6 +312,9 @@ class Event:
       "open_palette"   data: {}
       "new_session"    data: {}                -> UI opens the folder picker
       "quit"           data: {}                -> app stops the Controller and quits
+      "retitled"       data: {name}            a ⟳ Title re-read finished for session
+                       `name` (emitted just before its "Title re-read from tmux"
+                       toast); ends that session's retitle spinner
     """
     kind: str
     data: dict = field(default_factory=dict)
