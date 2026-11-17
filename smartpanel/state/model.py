@@ -301,12 +301,16 @@ class Event:
     """One-shot feedback that is not state: toasts, dialogs to open, navigation.
 
     kind:
-      "toast"          data: {text, error: bool, action: {label, page} | None}
+      "toast"          data: {text, error: bool, action: {label, page, focus?} | None}
+                       action.focus (optional): a session name the UI should
+                       also focus (Controller.focus_session) when clicked
       "confirm_close"  data: {name}            -> UI opens the journal-confirm dialog
-      "confirm_close_all" data: {}
+      "confirm_close_all" data: {count, journaled}
+                       count: sessions to close; journaled: how many get a journal
       "open_dashboard" data: {page}            -> page may be "journal:<id>", "sessions:board"
       "open_palette"   data: {}
       "new_session"    data: {}                -> UI opens the folder picker
+      "quit"           data: {}                -> app stops the Controller and quits
     """
     kind: str
     data: dict = field(default_factory=dict)
