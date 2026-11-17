@@ -1,0 +1,9 @@
+{
+  "uuid": "smartpanel-hud@omdev.dev",
+  "name": "smartPanel HUD",
+  "description": "Draws today's Claude Code spend, your Claude sessions and system metrics on the desktop, behind your windows. Reads the smartPanel app over D-Bus (dev.omdev.SmartPanel); turn it on from smartPanel's bar menu, Settings or command palette.",
+  "shell-version": [
+    "50"
+  ],
+  "version": 1
+}

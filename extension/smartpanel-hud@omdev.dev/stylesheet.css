@@ -1,0 +1,74 @@
+/* smartPanel HUD (B6): light text straight on the wallpaper with a soft shadow.
+ * Mirrors the `.hud` rules of docs/design/prototype.html. St has no text-transform or
+ * opacity, so upper-casing happens in hudmodel.js and "dim" is a translucent colour. */
+
+.smartpanel-hud {
+  color: #ffffff;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
+}
+
+.smartpanel-hud-label {
+  font-size: 10.5px;
+  letter-spacing: 2px;
+  color: #f0c9dc;
+}
+
+.smartpanel-hud-sub {
+  margin-top: 4px;
+}
+
+.smartpanel-hud-big {
+  font-size: 60px;
+  font-weight: 300;
+  letter-spacing: -1px;
+  font-feature-settings: "tnum";
+  color: #ffffff;
+}
+
+.smartpanel-hud-rows {
+  spacing: 3px;
+  margin-top: 16px;
+  font-size: 12.5px;
+}
+
+.smartpanel-hud-metrics {
+  margin-top: 12px;
+}
+
+.smartpanel-hud-row {
+  spacing: 10px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.smartpanel-hud-row-left {
+  color: #ecd3df;
+}
+
+.smartpanel-hud-row-right {
+  color: #ffffff;
+  font-feature-settings: "tnum";
+}
+
+/* session state words */
+.smartpanel-hud-waiting    { color: #ffc65c; }
+.smartpanel-hud-running    { color: #a9cdfa; }
+.smartpanel-hud-journaling { color: #e3a5ea; }
+.smartpanel-hud-idle,
+.smartpanel-hud-launching,
+.smartpanel-hud-unknown    { color: rgba(255, 255, 255, 0.6); }
+
+/* swap level, and the "tmux not installed" marker */
+.smartpanel-hud-warn { color: #ffc65c; }
+.smartpanel-hud-crit { color: #ff8f8f; }
+
+.smartpanel-hud-alert {
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: #ff8f8f;
+}
+
+.smartpanel-hud-offline {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
