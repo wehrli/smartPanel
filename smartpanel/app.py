@@ -196,10 +196,8 @@ class SmartPanelApp(Adw.Application):
     def do_shutdown(self) -> None:
         if self._timing:
             from smartpanel import timing
-            report = timing.report()
-            log.warning("main-loop timing report:\n%s", report)
             import sys
-            print(report, file=sys.stderr)
+            print(f"smartpanel: main-loop timing report\n{timing.report()}", file=sys.stderr)
             timing.uninstall()
             self._timing = False
         for unsub in self._unsubs:

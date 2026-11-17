@@ -551,3 +551,23 @@ def test_confirm_close_all_dialog_gets_event_data(monkeypatch):
                         lambda *args, data=None: got.update(data=data))
     a._open_session_dialog("confirm_close_all", {"names": ["claude-a"]})
     assert got["data"] == {"names": ["claude-a"]}
+
+
+def test_debug_timing_installs_the_hook_when_wiring(monkeypatch, tmp_path):
+    from smartpanel import cli, notify, timing
+    from smartpanel.app import SmartPanelApp
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(notify, "send", lambda *a, **k: True)
+    installed = []
+    monkeypatch.setattr(timing, "install", lambda *a, **k: installed.append(True))
+    app = SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
+    try:
+        app._wire(cli.parse_args(["--demo", "calm", "--debug-timing"]))
+        assert installed == [True] and app._timing
+    finally:
+        for svc in app._services:
+            stop = type(svc).__dict__.get("stop")
+            if stop is not None:
+                stop(svc)
+        app._services.clear()
