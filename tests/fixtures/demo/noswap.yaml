@@ -1,0 +1,704 @@
+system:
+  cpu:
+    percent: 23.0
+    temp_c: 61.0
+    cores: 8
+    history:
+    - 28.4
+    - 32.3
+    - 33.5
+    - 27.7
+    - 30.1
+    - 31.6
+    - 33.8
+    - 34.6
+    - 35.5
+    - 35.2
+    - 41.1
+    - 45.4
+    - 41.8
+    - 45.7
+    - 41.5
+    - 47.2
+    - 44.6
+    - 49.4
+    - 45.8
+    - 48.1
+    - 55.0
+    - 48.9
+    - 53.8
+    - 50.5
+    - 53.0
+    - 52.7
+    - 57.4
+    - 23.1
+    - 21.4
+    - 24.2
+  memory:
+    percent: 68.0
+    used_gb: 10.88
+    total_gb: 16.0
+    history:
+    - 68.8
+    - 68.8
+    - 68.0
+    - 67.6
+    - 66.8
+    - 67.1
+    - 68.2
+    - 67.5
+    - 66.5
+    - 65.9
+    - 66.9
+    - 66.4
+    - 66.8
+    - 66.1
+    - 65.3
+    - 64.0
+    - 63.8
+    - 64.6
+    - 65.3
+    - 66.0
+    - 65.3
+    - 66.5
+    - 65.7
+    - 65.7
+    - 66.2
+    - 66.7
+    - 66.0
+    - 68.2
+    - 67.8
+    - 68.2
+  swap:
+    percent: null
+    used_gb: null
+    total_gb: null
+    level: 0
+    warn_at: 60.0
+    crit_at: 85.0
+    history: []
+  disk:
+    mount: /
+    percent: 41.0
+    used_gb: 196.0
+    total_gb: 476.0
+  net:
+    down_bps: 2400000.0
+    up_bps: 180000.0
+    iface: wlp2s0
+    history_down:
+    - 200000.0
+    - 400000.0
+    - 300000.0
+    - 1200000.0
+    - 2800000.0
+    - 2100000.0
+    - 600000.0
+    - 400000.0
+    - 900000.0
+    - 2200000.0
+    - 3100000.0
+    - 2400000.0
+    history_up:
+    - 15000.0
+    - 30000.0
+    - 22500.0
+    - 90000.0
+    - 210000.0
+    - 157500.0
+    - 45000.0
+    - 30000.0
+    - 67500.0
+    - 165000.0
+    - 232500.0
+    - 180000.0
+  gpu:
+    available: false
+    vendor: null
+    percent: null
+    vram_used_gb: null
+    vram_total_gb: null
+    temp_c: null
+    history: []
+  updated_at: 1794925920.0
+spend:
+  cost_today: 23.84
+  cost_week: 142.1
+  cost_lifetime: 2318.55
+  tokens_today: 41200000
+  tokens_today_human: 41.2M
+  burn_per_hour: 3.1
+  cache_hit_pct: 94.0
+  hourly_today:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.4
+  - 1.9
+  - 3.4
+  - 2.8
+  - 3.1
+  - 4.2
+  - 3.3
+  - 2.6
+  - 1.4
+  - 0.74
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  projects_today:
+  - name: smartPanel
+    cost_usd: 9.2
+    tokens: 15899329
+  - name: tacomap
+    cost_usd: 7.45
+    tokens: 12875000
+  - name: JobScout
+    cost_usd: 5.1
+    tokens: 8813758
+  - name: ledgerly
+    cost_usd: 2.09
+    tokens: 3611913
+  models_today:
+  - family: Opus
+    cost_usd: 19.6
+    tokens: 33866400
+  - family: Sonnet
+    cost_usd: 3.91
+    tokens: 6756800
+  - family: Haiku
+    cost_usd: 0.33
+    tokens: 576800
+  praise_cost_today: 0.07
+  praise_echo_today: 0.21
+  days:
+  - date: '2026-11-17'
+    label: Today
+    cost_usd: 23.84
+    tokens: 41200000
+    projects:
+    - name: smartPanel
+      cost_usd: 9.2
+      tokens: 15899329
+    - name: tacomap
+      cost_usd: 7.45
+      tokens: 12875000
+    - name: JobScout
+      cost_usd: 5.1
+      tokens: 8813758
+    - name: ledgerly
+      cost_usd: 2.09
+      tokens: 3611913
+    models:
+    - family: Opus
+      cost_usd: 19.6
+      tokens: 33866400
+    - family: Sonnet
+      cost_usd: 3.91
+      tokens: 6756800
+    - family: Haiku
+      cost_usd: 0.33
+      tokens: 576800
+    praise_cost_usd: 0.07
+    praise_echo_cost_usd: 0.21
+  - date: '2026-11-16'
+    label: Yesterday
+    cost_usd: 31.02
+    tokens: 53608389
+    projects:
+    - name: smartPanel
+      cost_usd: 12.4
+      tokens: 21429530
+    - name: tacomap
+      cost_usd: 9.1
+      tokens: 15726510
+    - name: JobScout
+      cost_usd: 6.0
+      tokens: 10369127
+    - name: ledgerly
+      cost_usd: 3.52
+      tokens: 6083221
+    models:
+    - family: Opus
+      cost_usd: 25.5
+      tokens: 44066096
+    - family: Sonnet
+      cost_usd: 5.09
+      tokens: 8791776
+    - family: Haiku
+      cost_usd: 0.43
+      tokens: 750517
+    praise_cost_usd: 0.09
+    praise_echo_cost_usd: 0.28
+  - date: '2026-11-15'
+    label: Sun 15 Nov
+    cost_usd: 4.1
+    tokens: 7085570
+    projects:
+    - name: smartPanel
+      cost_usd: 2.9
+      tokens: 5011745
+    - name: tacomap
+      cost_usd: 1.2
+      tokens: 2073825
+    models:
+    - family: Opus
+      cost_usd: 3.37
+      tokens: 5824339
+    - family: Sonnet
+      cost_usd: 0.67
+      tokens: 1162033
+    - family: Haiku
+      cost_usd: 0.06
+      tokens: 99198
+    praise_cost_usd: 0.01
+    praise_echo_cost_usd: 0.04
+  - date: '2026-11-14'
+    label: Sat 14 Nov
+    cost_usd: 0
+    tokens: 0
+    projects: []
+    models: []
+    praise_cost_usd: 0.0
+    praise_echo_cost_usd: 0.0
+  - date: '2026-11-13'
+    label: Fri 13 Nov
+    cost_usd: 27.66
+    tokens: 47801678
+    projects:
+    - name: smartPanel
+      cost_usd: 10.2
+      tokens: 17627517
+    - name: tacomap
+      cost_usd: 9
+      tokens: 15553691
+    - name: JobScout
+      cost_usd: 5
+      tokens: 8640940
+    - name: ledgerly
+      cost_usd: 3.46
+      tokens: 5979530
+    models:
+    - family: Opus
+      cost_usd: 22.74
+      tokens: 39292979
+    - family: Sonnet
+      cost_usd: 4.54
+      tokens: 7839475
+    - family: Haiku
+      cost_usd: 0.39
+      tokens: 669223
+    praise_cost_usd: 0.08
+    praise_echo_cost_usd: 0.25
+  - date: '2026-11-12'
+    label: Thu 12 Nov
+    cost_usd: 22.48
+    tokens: 38849664
+    projects:
+    - name: smartPanel
+      cost_usd: 9.1
+      tokens: 15726510
+    - name: tacomap
+      cost_usd: 6.2
+      tokens: 10714765
+    - name: JobScout
+      cost_usd: 5
+      tokens: 8640940
+    - name: ledgerly
+      cost_usd: 2.18
+      tokens: 3767450
+    models:
+    - family: Opus
+      cost_usd: 18.48
+      tokens: 31934424
+    - family: Sonnet
+      cost_usd: 3.69
+      tokens: 6371345
+    - family: Haiku
+      cost_usd: 0.31
+      tokens: 543895
+    praise_cost_usd: 0.07
+    praise_echo_cost_usd: 0.2
+  - date: '2026-11-11'
+    label: Wed 11 Nov
+    cost_usd: 33
+    tokens: 57030201
+    projects:
+    - name: smartPanel
+      cost_usd: 13
+      tokens: 22466443
+    - name: tacomap
+      cost_usd: 10
+      tokens: 17281879
+    - name: JobScout
+      cost_usd: 6
+      tokens: 10369127
+    - name: ledgerly
+      cost_usd: 4
+      tokens: 6912752
+    models:
+    - family: Opus
+      cost_usd: 27.13
+      tokens: 46878825
+    - family: Sonnet
+      cost_usd: 5.41
+      tokens: 9352953
+    - family: Haiku
+      cost_usd: 0.46
+      tokens: 798423
+    praise_cost_usd: 0.1
+    praise_echo_cost_usd: 0.3
+  - date: '2026-11-10'
+    label: Tue 10 Nov
+    cost_usd: 28
+    tokens: 48389262
+    projects:
+    - name: smartPanel
+      cost_usd: 11
+      tokens: 19010067
+    - name: tacomap
+      cost_usd: 8
+      tokens: 13825503
+    - name: JobScout
+      cost_usd: 7
+      tokens: 12097316
+    - name: ledgerly
+      cost_usd: 2
+      tokens: 3456376
+    models:
+    - family: Opus
+      cost_usd: 23.02
+      tokens: 39775973
+    - family: Sonnet
+      cost_usd: 4.59
+      tokens: 7935839
+    - family: Haiku
+      cost_usd: 0.39
+      tokens: 677450
+    praise_cost_usd: 0.08
+    praise_echo_cost_usd: 0.25
+  - date: '2026-11-09'
+    label: Mon 9 Nov
+    cost_usd: 31
+    tokens: 53573826
+    projects:
+    - name: smartPanel
+      cost_usd: 15
+      tokens: 25922819
+    - name: tacomap
+      cost_usd: 9
+      tokens: 15553691
+    - name: JobScout
+      cost_usd: 4
+      tokens: 6912752
+    - name: ledgerly
+      cost_usd: 3
+      tokens: 5184564
+    models:
+    - family: Opus
+      cost_usd: 25.48
+      tokens: 44037685
+    - family: Sonnet
+      cost_usd: 5.08
+      tokens: 8786107
+    - family: Haiku
+      cost_usd: 0.43
+      tokens: 750034
+    praise_cost_usd: 0.09
+    praise_echo_cost_usd: 0.28
+  - date: '2026-11-08'
+    label: Sun 8 Nov
+    cost_usd: 4.1
+    tokens: 7085570
+    projects:
+    - name: smartPanel
+      cost_usd: 3
+      tokens: 5184563
+    - name: tacomap
+      cost_usd: 1
+      tokens: 1728188
+    - name: ledgerly
+      cost_usd: 0.1
+      tokens: 172819
+    models:
+    - family: Opus
+      cost_usd: 3.37
+      tokens: 5824339
+    - family: Sonnet
+      cost_usd: 0.67
+      tokens: 1162033
+    - family: Haiku
+      cost_usd: 0.06
+      tokens: 99198
+    praise_cost_usd: 0.01
+    praise_echo_cost_usd: 0.04
+  - date: '2026-11-07'
+    label: Sat 7 Nov
+    cost_usd: 0
+    tokens: 0
+    projects: []
+    models: []
+    praise_cost_usd: 0.0
+    praise_echo_cost_usd: 0.0
+  - date: '2026-11-06'
+    label: Fri 6 Nov
+    cost_usd: 27.7
+    tokens: 47870805
+    projects:
+    - name: smartPanel
+      cost_usd: 12
+      tokens: 20738255
+    - name: tacomap
+      cost_usd: 7
+      tokens: 12097315
+    - name: JobScout
+      cost_usd: 6
+      tokens: 10369127
+    - name: ledgerly
+      cost_usd: 2.7
+      tokens: 4666107
+    models:
+    - family: Opus
+      cost_usd: 22.77
+      tokens: 39349802
+    - family: Sonnet
+      cost_usd: 4.54
+      tokens: 7850812
+    - family: Haiku
+      cost_usd: 0.39
+      tokens: 670191
+    praise_cost_usd: 0.08
+    praise_echo_cost_usd: 0.25
+  - date: '2026-11-05'
+    label: Thu 5 Nov
+    cost_usd: 31
+    tokens: 53573826
+    projects:
+    - name: smartPanel
+      cost_usd: 13
+      tokens: 22466443
+    - name: tacomap
+      cost_usd: 9
+      tokens: 15553691
+    - name: JobScout
+      cost_usd: 6
+      tokens: 10369128
+    - name: ledgerly
+      cost_usd: 3
+      tokens: 5184564
+    models:
+    - family: Opus
+      cost_usd: 25.48
+      tokens: 44037685
+    - family: Sonnet
+      cost_usd: 5.08
+      tokens: 8786107
+    - family: Haiku
+      cost_usd: 0.43
+      tokens: 750034
+    praise_cost_usd: 0.09
+    praise_echo_cost_usd: 0.28
+  - date: '2026-11-04'
+    label: Wed 4 Nov
+    cost_usd: 20
+    tokens: 34563758
+    projects:
+    - name: smartPanel
+      cost_usd: 8
+      tokens: 13825503
+    - name: tacomap
+      cost_usd: 6
+      tokens: 10369127
+    - name: JobScout
+      cost_usd: 5
+      tokens: 8640940
+    - name: ledgerly
+      cost_usd: 1
+      tokens: 1728188
+    models:
+    - family: Opus
+      cost_usd: 16.44
+      tokens: 28411409
+    - family: Sonnet
+      cost_usd: 3.28
+      tokens: 5668456
+    - family: Haiku
+      cost_usd: 0.28
+      tokens: 483893
+    praise_cost_usd: 0.06
+    praise_echo_cost_usd: 0.18
+  forecast:
+    budget_usd: 40.0
+    pct: 59.6
+    eta: '19:45'
+    eta_reason: null
+    over_by_usd: 0.0
+  updated_at: 1794925920.0
+sessions:
+  items:
+  - name: claude-smartPanel
+    project: smartPanel
+    title: Fix swap alert hysteresis
+    cwd: ~/dev/omdev/smartPanel
+    attached: true
+    created: 1794922200.0
+    activity: waiting
+    phase: none
+    doing: null
+    prompt:
+      question: Do you want to make this edit to alerts.py?
+      options:
+      - 'Yes'
+      - Yes, allow all edits this session
+      - No, tell Claude what to do differently
+      cursor: 0
+      kind: permission
+      fingerprint: a76ca9faa445c506
+    waiting_since: 1794925680.0
+    cost_usd: 2.9
+    journal: null
+  - name: claude-tacomap
+    project: tacomap
+    title: Truck search filters
+    cwd: ~/dev/omdev/tacomap
+    attached: false
+    created: 1794923640.0
+    activity: running
+    phase: none
+    doing: Bash · npm test -- filters
+    prompt: null
+    waiting_since: null
+    cost_usd: 1.85
+    journal: null
+  - name: claude-JobScout
+    project: JobScout
+    title: Stripe webhook retries
+    cwd: ~/dev/omdev/JobScout
+    attached: false
+    created: 1794925200.0
+    activity: running
+    phase: none
+    doing: Waiting for 2 background agents
+    prompt: null
+    waiting_since: null
+    cost_usd: 1.88
+    journal: null
+  - name: claude-ledgerly
+    project: ledgerly
+    title: Migrate goose 0023
+    cwd: ~/dev/omdev/ledgerly
+    attached: false
+    created: 1794914520.0
+    activity: idle
+    phase: none
+    doing: null
+    prompt: null
+    waiting_since: null
+    cost_usd: 2.09
+    journal: null
+  tmux_ok: true
+  terminal_ok: true
+  updated_at: 1794925920.0
+journal:
+  entries:
+  - id: 2026-11-17-1202-tacomap
+    path: ~/.claude/smartpanel/journals/2026-11-17-1202-tacomap.md
+    time: 1794916920.0
+    title: Map clustering
+    project: tacomap
+    outcome: journaled
+    confirmation: Journaled tacomap to JOURNAL/2026-11.md. Map clustering moved to supercluster on the
+      web map; server-side tiles rejected for now.
+    duration_s: 9000
+    files:
+    - web/src/components/Map.tsx
+    - web/src/lib/cluster.ts
+    - web/package.json
+    commands:
+    - npm test -- map
+    - npm run build
+    tools:
+      Read: 14
+      Edit: 9
+      Bash: 6
+      Grep: 4
+    readable: true
+  - id: 2026-11-17-1124-JobScout
+    path: ~/.claude/smartpanel/journals/2026-11-17-1124-JobScout.md
+    time: 1794914640.0
+    title: Résumé parser
+    project: JobScout
+    outcome: timeout
+    confirmation: The /journal skill timed out after 300 s. The session was still closed; this receipt
+      holds the Activity section only.
+    duration_s: 5040
+    files:
+    - src/lib/resume/parse.ts
+    - src/lib/resume/parse.test.ts
+    commands:
+    - npm test -- resume
+    tools:
+      Read: 11
+      Edit: 6
+      Bash: 4
+    readable: true
+  - id: 2026-11-17-1036-smartPanel
+    path: ~/.claude/smartpanel/journals/2026-11-17-1036-smartPanel.md
+    time: 1794911760.0
+    title: Pricing table refresh
+    project: smartPanel
+    outcome: journaled
+    confirmation: Journaled smartPanel to JOURNAL/2026-11.md. pricing.py carries the 5.5 family; unknown
+      models still fall back to Opus rates.
+    duration_s: 7560
+    files:
+    - smartpanel/claude_stats/pricing.py
+    - tests/test_pricing.py
+    commands:
+    - pytest tests/test_pricing.py
+    tools:
+      Read: 8
+      Edit: 5
+      Bash: 3
+    readable: true
+  monthly_log_path: ~/dev/omdev/JOURNAL/2026-11.md
+app:
+  version: ''
+  loading: null
+  first_run: false
+  demo: noswap
+  ticker_pinned: false
+  ticker_index: 0
+settings:
+  values:
+    bar.strip: true
+    bar.graphs: true
+    bar.text: true
+    bar.ticker: false
+    bar.ticker_seconds: 5
+    swap.warn: 60
+    swap.crit: 85
+    swap.hysteresis: 5
+    swap.repeat_s: 600
+    budget.daily_usd: null
+    notifications.budget: true
+    sessions.journal: true
+    sessions.min_age_s: 120
+    sessions.confirm_seconds: 5
+    sessions.reattach: true
+    sessions.dir: ~/dev/omdev
+    sessions.terminal: terminator
+    disk.mount: /
+    hud.enabled: false
+    hud.corner: top-right
+    appearance.style: system
+    palette.shortcut: <Ctrl><Alt>space
+  overridden_by: {}
