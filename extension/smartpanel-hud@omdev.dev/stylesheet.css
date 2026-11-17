@@ -1,15 +1,16 @@
 /* smartPanel HUD (B6): light text straight on the wallpaper with a soft shadow.
  * Mirrors the `.hud` rules of docs/design/prototype.html. St has no text-transform or
- * opacity, so upper-casing happens in hudmodel.js and "dim" is a translucent colour. */
+ * opacity, so upper-casing happens in extension.js and "dim" is a translucent colour. */
 
 .smartpanel-hud {
   color: #ffffff;
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
 }
 
+/* letter-spacing for the label, sub line and big number is Pango markup in extension.js: St doesn't measure CSS
+ * letter-spacing, so it would ellipsize the line */
 .smartpanel-hud-label {
   font-size: 10.5px;
-  letter-spacing: 2px;
   color: #f0c9dc;
 }
 
@@ -20,7 +21,6 @@
 .smartpanel-hud-big {
   font-size: 60px;
   font-weight: 300;
-  letter-spacing: -1px;
   font-feature-settings: "tnum";
   color: #ffffff;
 }
@@ -38,7 +38,10 @@
 .smartpanel-hud-row {
   spacing: 10px;
   padding-bottom: 3px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  /* St ignores the `border-bottom: 1px solid …` shorthand here (verified in a real
+   * GNOME Shell 50); the long form draws the prototype's hairline. */
+  border-bottom-width: 1px;
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 .smartpanel-hud-row-left {

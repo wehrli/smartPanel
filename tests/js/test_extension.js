@@ -182,7 +182,8 @@ test('name appears: GetState for the HUD sections, then the busy HUD is drawn to
     const a = hud();
     eq(a.visible, true);
     eq(texts(a), [
-        'CLAUDE · TODAY', '23.84', 'usd · 41.2M tokens · 3.10/h',
+        // upper-cased like the prototype's .hl (text-transform), which St lacks
+        'CLAUDE · TODAY', '23.84', 'USD · 41.2M TOKENS · 3.10/H',
         'Fix swap alert hysteresis', 'needs you',
         'Truck search filters', 'running',
         'Stripe webhook retries', 'running',
@@ -289,6 +290,39 @@ test('monitors-changed / workareas-changed re-layout on the primary monitor', as
     ext.disable();
 });
 
+test('header lines are letter-spaced markup (St does not measure CSS letter-spacing)', async () => {
+    await load();
+    const ext = newExtension();
+    watch().appeared();
+    const s = readJson(`${FIX}/busy.json`);
+    s.spend.tokens_today_human = '<b>&';           // must be escaped, not parsed
+    fake().calls[0].reply(JSON.stringify(s));
+    const labels = hud().children.filter(c => c instanceof st.Label);
+    const [label, big, sub] = labels;
+    ok(/^<span letter_spacing="\d+">CLAUDE · TODAY<\/span>$/.test(label.markup), label.markup);
+    ok(/^<span letter_spacing="-\d+">23\.84<\/span>$/.test(big.markup), big.markup);
+    ok(sub.markup.includes('&lt;B&gt;&amp;'), sub.markup);
+    eq(sub.text, 'USD · <B>& TOKENS · 3.10/H');
+    ext.disable();
+});
+
+test('a wide header line widens the HUD instead of being cut', async () => {
+    await load();
+    const ext = newExtension();
+    watch().appeared();
+    replyWith('busy');
+    eq(hud().width, 240);
+    const s = readJson(`${FIX}/busy.json`);
+    s.spend.tokens_today_human = '123456.7M';       // fake St: 8 px per char
+    changed(['settings']);
+    fake().calls[0].reply(JSON.stringify(s));
+    const want = 'USD · 123456.7M TOKENS · 3.10/H'.length * 8;
+    ok(want > 240);
+    eq(hud().width, want);
+    eq(hud().x, 1920 - 30 - want, 'still flush with the right margin');
+    ext.disable();
+});
+
 test('name vanishes: dim "smartPanel not running" when it was on, nothing when off', async () => {
     await load();
     let ext = newExtension();
@@ -352,6 +386,8 @@ test('disable: everything torn down, late replies are harmless', async () => {
     const ext = newExtension();
     watch().appeared();
     replyWith('busy');
+    fakeMod.advance(0);               // run the post-render idle relayout
+    eq(fake().timers.size, 0);
     changed(['system']);              // arms the trailing timer
     eq(fake().timers.size, 1);
     changed(['settings']);            // and one call in flight

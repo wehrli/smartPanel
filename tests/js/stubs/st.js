@@ -11,7 +11,16 @@ export class Widget extends Signals {
         this.children = [];
         this.parent = null;
         this.destroyed = false;
-        this.clutter_text = {ellipsize: 0};
+        const self = this;
+        this.clutter_text = {
+            ellipsize: 0,
+            set_markup(markup) {
+                self.markup = markup;
+                self.text = markup.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+                    .replace(/&amp;/g, '&');
+            },
+        };
         Object.assign(this, props);
         fake.actors.push(this);
     }
@@ -62,6 +71,12 @@ export class Widget extends Signals {
     set_position(x, y) {
         this.x = x;
         this.y = y;
+    }
+
+    /** 8 px per character of text: enough for the width maths. */
+    get_preferred_width(_forHeight) {
+        const w = (this.text ?? '').length * 8;
+        return [w, w];
     }
 
     set_accessible_name(name) {

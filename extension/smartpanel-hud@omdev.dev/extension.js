@@ -44,8 +44,21 @@ const CALL_TIMEOUT_MS = 3000;
 // Indirection so tests can capture warnings (console.warn itself is read-only in gjs).
 export const logger = {warn: msg => console.warn(msg)};
 
+// Header letter-spacing (prototype .hl: .2em). It goes in Pango markup, not CSS:
+// St does not count CSS letter-spacing when it measures a label, so a CSS-spaced line
+// gets ellipsized ("CLAUDE · TOD…", seen in a real GNOME Shell 50 run). In Pango units
+// of 1/1024 pt: 1.5 pt ≈ 2 px.
+const HEADER_LETTER_SPACING = 1536;
+const BIG_LETTER_SPACING = -768;      // prototype .hbig: -.02em ≈ -1 px
+
 function label(styleClass, extra = {}) {
     return new St.Label({style_class: styleClass, reactive: false, ...extra});
+}
+
+/** Letter-spaced label text, via markup so St measures what it paints. */
+function setSpaced(lbl, text, spacing) {
+    const escaped = GLib.markup_escape_text(text, -1);
+    lbl.clutter_text.set_markup(`<span letter_spacing="${spacing}">${escaped}</span>`);
 }
 
 /** The actor tree. Knows nothing about D-Bus; render() takes a hudmodel model. */
@@ -65,6 +78,9 @@ export class HudView {
         this._label = label('smartpanel-hud-label');
         this._big = label('smartpanel-hud-big');
         this._sub = label('smartpanel-hud-label smartpanel-hud-sub');
+        // Headers never ellipsize; the HUD widens for them instead (see width()).
+        for (const l of [this._label, this._big, this._sub])
+            l.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
         this._rows = new St.BoxLayout({
             style_class: 'smartpanel-hud-rows',
             orientation: Clutter.Orientation.VERTICAL,
@@ -104,11 +120,12 @@ export class HudView {
 
         const online = !model.offline;
         this._label.visible = true;
-        this._label.text = model.label;
+        // upper-cased here: the prototype's .hl has text-transform, St has none
+        setSpaced(this._label, model.label.toUpperCase(), HEADER_LETTER_SPACING);
         this._big.visible = online;
-        this._big.text = model.headline;
+        setSpaced(this._big, model.headline, BIG_LETTER_SPACING);
         this._sub.visible = online;
-        this._sub.text = model.sub;
+        setSpaced(this._sub, model.sub.toUpperCase(), HEADER_LETTER_SPACING);
 
         this._fillRows(this._rows, online ? model.rows : [],
             r => [r.left, r.right, r.style]);
@@ -120,6 +137,20 @@ export class HudView {
         this._message.visible = Boolean(model.message);
         this._message.text = model.message ?? '';
         return true;
+    }
+
+    /**
+     * HUD_WIDTH (the prototype's 240 px), or wider when a header line needs it, e.g.
+     * "USD · 41.2M TOKENS · 3.10/H" in a large system font. Session titles ellipsize
+     * inside that width rather than widening it.
+     */
+    width() {
+        let w = HUD_WIDTH;
+        for (const l of [this._label, this._big, this._sub]) {
+            if (l.visible)
+                w = Math.max(w, Math.ceil(l.get_preferred_width(-1)[1]));
+        }
+        return w;
     }
 
     _fillRows(box, items, unpack) {
@@ -151,6 +182,10 @@ export default class SmartPanelHudExtension extends Extension {
         this._group = Main.layoutManager._backgroundGroup;
         this._group.add_child(this._view.actor);
         this._raise();
+        this._relayoutId = 0;
+        // Sizes are only final once St has styled and allocated the tree; a bottom
+        // corner depends on the height, so re-place whenever it settles.
+        this._view.actor.connect('notify::height', () => this._queueRelayout());
 
         this._settings = null;      // last hudSettings() we heard; null == never
         this._online = false;
@@ -207,6 +242,10 @@ export default class SmartPanelHudExtension extends Extension {
         if (this._workareasId) {
             global.display.disconnect(this._workareasId);
             this._workareasId = 0;
+        }
+        if (this._relayoutId) {
+            GLib.source_remove(this._relayoutId);
+            this._relayoutId = 0;
         }
         this._view?.destroy();
         this._view = null;
@@ -269,8 +308,21 @@ export default class SmartPanelHudExtension extends Extension {
     _render(model) {
         if (!this._view)
             return;
-        if (this._view.render(model))
+        if (this._view.render(model)) {
             this._relayout();
+            this._queueRelayout();
+        }
+    }
+
+    /** Re-place once after the current frame's styling/allocation (deduplicated). */
+    _queueRelayout() {
+        if (this._relayoutId || !this._view)
+            return;
+        this._relayoutId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._relayoutId = 0;
+            this._relayout();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _raise() {
@@ -292,10 +344,13 @@ export default class SmartPanelHudExtension extends Extension {
         view.actor.show();
         this._raise();
         const area = Main.layoutManager.getWorkAreaForMonitor(index);
-        const [, height] = view.actor.get_preferred_height(HUD_WIDTH);
+        const width = view.width();
+        if (view.actor.width !== width)
+            view.actor.width = width;
+        const [, height] = view.actor.get_preferred_height(width);
         const {x, y} = placeHud(
             {x: area.x, y: area.y, width: area.width, height: area.height},
-            {width: HUD_WIDTH, height},
+            {width, height},
             view.model.corner, view.model.margin);
         view.actor.set_position(x, y);
     }
