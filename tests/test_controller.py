@@ -144,6 +144,12 @@ def test_focus_reattach_and_failure_copy(tmp_path):
     assert hh.toasts()[-1]["text"].startswith("Re-attached “webapp”")
 
 
+def test_focus_result_is_reported_even_when_nothing_is_tried(h):
+    results = []
+    h.ctl.focus_session("claude-nope", on_result=results.append)
+    assert results == ["failed"] and h.focus_calls == []
+
+
 def test_retitle(h):
     h.ctl.retitle_session("claude-webapp")
     assert h.toasts()[-1]["text"] == "Title re-read from tmux"

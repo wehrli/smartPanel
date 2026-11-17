@@ -30,7 +30,6 @@ import dataclasses
 import logging
 import re
 import shutil
-import socket
 import threading
 import time
 from dataclasses import dataclass, field
@@ -126,6 +125,12 @@ class _Journaling:
     snapshot: Session
 
 
+@dataclasses.dataclass(frozen=True)
+class _Heading:
+    project: str
+    title: str
+
+
 class SessionsService:
     def __init__(self, store, config, spend=None, *, run: tmux.Runner | None = None,
                  loop=None, clock: Callable[[], float] = time.time,
@@ -138,7 +143,9 @@ class SessionsService:
         self.clock = clock
         self.which = which or shutil.which
         self.find_transcript = find_transcript or journal.find_transcript
-        self.hostname = socket.gethostname() if hostname is None else hostname
+        # Injectable so tests don't depend on the box: tmux's default pane
+        # title is the hostname, which `clean_title` drops as a placeholder.
+        self.hostname = hostname
 
         self.pushed_titles: dict[str, str] = {}   # tmux name -> terminal title we set
         self.waiting_since: dict[str, float] = {}
@@ -152,6 +159,7 @@ class SessionsService:
         self._unsubscribe: Callable[[], None] | None = None
         self._cost_running = False
         self._cost_last = float("-inf")
+        self._cost_pending = False
 
     # ── lifecycle ──
     def start(self) -> None:
@@ -177,10 +185,7 @@ class SessionsService:
             self._unsubscribe = None
 
     def _tick(self) -> bool:
-        try:
-            self.refresh()
-        except Exception:  # noqa: BLE001 — never let a refresh kill the timer
-            log.exception("session refresh failed")
+        self.refresh()  # never raises
         return True
 
     def _env_tick(self) -> bool:
@@ -192,9 +197,10 @@ class SessionsService:
         return True
 
     def _on_store_change(self, sections: set[str]) -> None:
-        # The spend aggregator's tick: per-file costs may have moved.
+        # The spend aggregator's tick: per-file costs may have moved. The tick
+        # is already rate-limited, so it bypasses the 15 s throttle.
         if "spend" in sections:
-            self.request_costs()
+            self.request_costs(force=True)
 
     # ── environment (SP-2605) ──
     def terminal(self) -> str:
@@ -208,9 +214,20 @@ class SessionsService:
 
     # ── the refresh ──
     def refresh(self) -> bool:
-        """Re-read tmux and write the `sessions` section. Returns True if it changed."""
+        """Re-read tmux and write the `sessions` section. Returns True if it changed.
+
+        Never raises: it is called from action paths (GTK, D-Bus) as well as
+        the timer, and the Actions contract is that actions don't raise.
+        """
+        try:
+            return self._refresh()
+        except Exception:  # noqa: BLE001
+            log.exception("session refresh failed")
+            return False
+
+    def _refresh(self) -> bool:
         now = self.clock()
-        live = tmux.list_sessions(run=self.run)
+        live = tmux.list_sessions(run=self.run, hostname=self.hostname)
         self.live = live
         names = {s.name for s in live}
 
@@ -246,22 +263,27 @@ class SessionsService:
             self.waiting_since.setdefault(s.name, now)
         else:
             self.waiting_since.pop(s.name, None)
-        if s.name not in self.cwds:
-            # Once per session: a Claude session never changes directory.
-            self.cwds[s.name] = tmux.session_cwd(s.name, run=self.run)
-        cwd = self.cwds[s.name]
+        cwd = self.cwd(s.name)
+        doing = prompt = None
+        try:
+            if activity == RUNNING:
+                doing = describe_running(pane)
+            elif activity == WAITING:
+                prompt = parse_prompt(pane)
+        except Exception:  # noqa: BLE001 — one odd pane must not blank every row
+            log.debug("pane parse failed for %s", s.name, exc_info=True)
         j = self.journaling.get(s.name)
         session = Session(
             name=s.name,
-            project=Path(cwd).name if cwd else s.project,
+            project=self.project_of(s, cwd),
             title=s.title,
             cwd=cwd,
             attached=s.attached,
             created=float(s.created),
             activity=activity,
             phase=PHASE_JOURNALING if j else PHASE_NONE,
-            doing=describe_running(pane) if activity == RUNNING else None,
-            prompt=parse_prompt(pane) if activity == WAITING else None,
+            doing=doing,
+            prompt=prompt,
             waiting_since=self.waiting_since.get(s.name),
             cost_usd=self.costs.get(s.name),
             journal=dataclasses.replace(j.progress) if j else None,
@@ -269,6 +291,26 @@ class SessionsService:
         if j:
             j.snapshot = session
         return session
+
+    def cwd(self, name: str) -> str | None:
+        """The session's folder, looked up once: a Claude session never changes
+        directory. A failed lookup (None) is not cached, so it is retried."""
+        cwd = self.cwds.get(name)
+        if not cwd:
+            cwd = tmux.session_cwd(name, run=self.run)
+            if cwd:
+                self.cwds[name] = cwd
+        return cwd
+
+    @staticmethod
+    def project_of(s: tmux.TmuxSession, cwd: str | None) -> str:
+        """SP-1405: one project name everywhere — the folder name, falling back
+        to the tmux name minus its prefix while the folder is unknown."""
+        return Path(cwd).name if cwd else s.project
+
+    def heading_of(self, s: tmux.TmuxSession) -> str:
+        """`uiformat.session_heading` built on the same project as the row."""
+        return session_heading(_Heading(self.project_of(s, self.cwds.get(s.name)), s.title))
 
     def find(self, name: str) -> Session | None:
         return next((s for s in self.store.state.sessions.items if s.name == name), None)
@@ -287,7 +329,7 @@ class SessionsService:
         for name in [n for n in self.pushed_titles if n not in alive]:
             del self.pushed_titles[name]
         for s in live:
-            heading = session_heading(s)
+            heading = self.heading_of(s)
             if self.pushed_titles.get(s.name) != heading:
                 tmux.set_terminal_title(s.name, heading, run=self.run)
                 self.pushed_titles[s.name] = heading
@@ -297,7 +339,7 @@ class SessionsService:
         if name in self.pushed_titles:
             return self.pushed_titles[name]
         s = self.tmux_session(name)
-        return session_heading(s) if s else name
+        return self.heading_of(s) if s else name
 
     def retitle(self, name: str) -> None:
         self.pushed_titles.pop(name, None)
@@ -361,7 +403,11 @@ class SessionsService:
     # ── per-session cost (SP-1401) ──
     def request_costs(self, force: bool = False) -> None:
         """Recompute costs on a worker thread, at most every 15 s."""
-        if self.spend is None or self.loop is None or self._cost_running:
+        if self.spend is None or self.loop is None:
+            return
+        if self._cost_running:
+            # Run once more when the current pass lands, rather than drop it.
+            self._cost_pending = self._cost_pending or force
             return
         now = time.monotonic()
         if not force and now - self._cost_last < COST_MIN_INTERVAL_S:
@@ -385,6 +431,9 @@ class SessionsService:
         if costs != self.costs:
             self.costs = costs
             self.refresh()
+        if self._cost_pending:
+            self._cost_pending = False
+            self.request_costs(force=True)
 
 
 def compute_costs(sessions: list[tuple[str, str | None, float]],

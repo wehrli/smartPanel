@@ -161,6 +161,10 @@ class Controller:
     def focus_session(self, name: str, on_result: Callable[[str], None] | None = None) -> None:
         s = self._session(name)
         if s is None or self._busy(s) or name in self._focusing:
+            # Unknown, journaling/launching, or already being focused: no
+            # window was raised. A caller waiting on the result still gets one.
+            if on_result is not None:
+                self._post(lambda: self._report_focus(on_result, focus_mod.FAILED))
             return
         self._focusing.add(name)
         heading = self.sessions.heading(name)
@@ -188,10 +192,14 @@ class Controller:
             self.sessions.pushed_titles.pop(name, None)
         self.sessions.refresh()  # `attached` may have changed
         if on_result is not None:
-            try:
-                on_result(result)
-            except Exception:  # noqa: BLE001
-                log.exception("focus result callback failed")
+            self._report_focus(on_result, result)
+
+    @staticmethod
+    def _report_focus(on_result: Callable[[str], None], result: str) -> None:
+        try:
+            on_result(result)
+        except Exception:  # noqa: BLE001
+            log.exception("focus result callback failed")
 
     def retitle_session(self, name: str) -> None:
         s = self._session(name)

@@ -96,6 +96,49 @@ def test_untitled_session_title_falls_back_to_the_project_heading():
     assert tm.titles["claude-webapp"] == "webapp"
 
 
+def test_untitled_terminal_title_uses_the_folder_name_like_the_row():
+    # SP-1405: tmux name "claude-ledgerly-2", folder "ledgerly" -> both read "ledgerly".
+    s, store, tm, _ = make({"claude-ledgerly-2": FakeSession(cwd="/home/u/dev/ledgerly")})
+    s.refresh()
+    assert store.state.sessions.items[0].project == "ledgerly"
+    assert tm.titles["claude-ledgerly-2"] == "ledgerly"
+    assert s.heading("claude-ledgerly-2") == "ledgerly"
+
+
+def test_failed_cwd_lookup_is_retried_next_refresh():
+    fs = FakeSession(cwd=None)
+    s, store, tm, _ = make({"claude-webapp": fs})
+    s.refresh()
+    assert store.state.sessions.items[0].cwd is None
+    fs.cwd = "/home/u/dev/webapp"
+    s.refresh()
+    assert store.state.sessions.items[0].cwd == "/home/u/dev/webapp"
+    n = sum(1 for c in tm.calls if c[0] == "display-message")
+    s.refresh()
+    assert sum(1 for c in tm.calls if c[0] == "display-message") == n  # cached now
+
+
+def test_a_parser_crash_on_one_pane_does_not_blank_the_list(monkeypatch):
+    def boom(pane):
+        raise ValueError("odd pane")
+    monkeypatch.setattr(svc, "parse_prompt", boom)
+    monkeypatch.setattr(svc, "describe_running", boom)
+    s, store, tm, _ = make({
+        "claude-a": FakeSession(pane=pane("bash_permission")),
+        "claude-b": FakeSession(pane=pane("running_bash")),
+        "claude-c": FakeSession()})
+    assert s.refresh() is True
+    assert len(store.state.sessions.items) == 3
+    assert all(x.prompt is None and x.doing is None for x in store.state.sessions.items)
+
+
+def test_refresh_never_raises(monkeypatch):
+    s, store, tm, _ = make({"claude-a": FakeSession()})
+    monkeypatch.setattr(svc.tmux, "list_sessions",
+                        lambda **kw: (_ for _ in ()).throw(RuntimeError("x")))
+    assert s.refresh() is False
+
+
 def test_environment_check():
     s, store, tm, _ = make(which=lambda n: None)
     assert s.check_environment() == (True, False)
@@ -213,9 +256,24 @@ def test_spend_section_change_triggers_cost_recompute():
                            find_transcript={"/p/a": Path("/t/a.jsonl")}.get)
     s.start()
     asked = len(spend.asked)
-    s._cost_last = float("-inf")
+    # Inside the 15 s throttle window: the aggregator tick still recomputes.
     store.update("spend", cost_today=3.0)
     assert len(spend.asked) == asked + 1
+
+
+def test_cost_request_during_a_running_pass_is_deferred_not_dropped():
+    spend = FakeSpend({"/t/a.jsonl": 1.5})
+    s, store, tm, _ = make({"claude-a": FakeSession(cwd="/p/a")}, spend=spend,
+                           find_transcript={"/p/a": Path("/t/a.jsonl")}.get)
+    s.refresh()
+    held = []
+    s.loop.thread = lambda fn, name="w": held.append(fn)   # keep the pass in flight
+    s.request_costs(force=True)
+    s.request_costs(force=True)                            # arrives mid-pass
+    assert len(held) == 1
+    s.loop.thread = lambda fn, name="w": fn()
+    held[0]()                                              # first pass lands -> reruns
+    assert len(spend.asked) == 2
 
 
 def test_no_tmux_server_is_an_empty_list():

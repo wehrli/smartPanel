@@ -89,11 +89,13 @@ def tmux_available(run: Runner = _run) -> bool:
     return rc == 0
 
 
-def list_sessions(prefix: str = SESSION_PREFIX, run: Runner = _run) -> list[TmuxSession]:
+def list_sessions(prefix: str = SESSION_PREFIX, run: Runner = _run,
+                  hostname: str | None = None) -> list[TmuxSession]:
     """List managed tmux sessions, newest first.
 
     Returns [] when tmux is absent or no server is running (rc != 0). Only
-    sessions whose name starts with `prefix` are returned; pass "" to list all.
+    sessions whose name starts with `prefix` are returned; pass "" to list all. `hostname` (default: this box's) is
+    the placeholder pane title that `clean_title` drops.
     """
     rc, out, err = run(["list-sessions", "-F", _LIST_FORMAT])
     if rc != 0:
@@ -101,7 +103,8 @@ def list_sessions(prefix: str = SESSION_PREFIX, run: Runner = _run) -> list[Tmux
         if err and "no server running" not in err:
             log.debug("tmux list-sessions rc=%d: %s", rc, err.strip())
         return []
-    sessions = [s for s in _parse_sessions(out, hostname=socket.gethostname())
+    host = socket.gethostname() if hostname is None else hostname
+    sessions = [s for s in _parse_sessions(out, hostname=host)
                 if s.name.startswith(prefix)]
     sessions.sort(key=lambda s: s.created, reverse=True)
     return sessions
