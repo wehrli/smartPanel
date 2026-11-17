@@ -192,6 +192,16 @@ class MenuModel:
 
 # ───────────────────────── D-Bus glue ─────────────────────────
 
+def register_object(conn: Gio.DBusConnection, path: str, info: Gio.DBusInterfaceInfo,
+                    on_method, on_get_property) -> int:
+    """`register_object_with_closures2` where PyGObject has it (the plain
+    `register_object` override is deprecated), else the old call."""
+    fn = getattr(conn, "register_object_with_closures2", None)
+    if fn is not None:
+        return fn(path, info, on_method, on_get_property, None)
+    return conn.register_object(path, info, on_method, on_get_property, None)
+
+
 INTERFACE = "com.canonical.dbusmenu"
 
 INTROSPECTION = """
@@ -271,8 +281,8 @@ class DbusMenuServer:
     # ── lifecycle ──
     def export(self, connection: Gio.DBusConnection) -> None:
         self._conn = connection
-        self._reg_id = connection.register_object(
-            self.path, self._info, self._on_method, self._on_get_property, None)
+        self._reg_id = register_object(
+            connection, self.path, self._info, self._on_method, self._on_get_property)
 
     def unexport(self) -> None:
         if self._conn and self._reg_id:
