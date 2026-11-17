@@ -89,6 +89,7 @@ class RecordingActions:
     def close_all(self): self._rec("close_all")
     def request_new_session(self): self._rec("request_new_session")
     def new_session(self, directory): self._rec("new_session", directory)
+    def open_path(self, path): self._rec("open_path", path)
 
     def answer_prompt(self, name, option, fingerprint):
         self._rec("answer_prompt", name, option, fingerprint)
@@ -150,6 +151,7 @@ ACTION_CASES = [
     (("PinTicker", True), ("pin_ticker", True)),
     (("FocusSession", "claude-ledgerly"), ("focus_session", "claude-ledgerly")),
     (("RetitleSession", "claude-ledgerly"), ("retitle_session", "claude-ledgerly")),
+    (("OpenPath", "/home/u/JOURNAL/2026-11.md"), ("open_path", "/home/u/JOURNAL/2026-11.md")),
     (("RequestClose", "claude-a"), ("request_close", "claude-a")),
     (("CloseSession", "claude-a", True), ("close_session", "claude-a", True)),
     (("CloseSession", "claude-a", False), ("close_session", "claude-a", False)),

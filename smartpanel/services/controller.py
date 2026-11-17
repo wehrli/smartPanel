@@ -48,6 +48,24 @@ log = logging.getLogger(__name__)
 DEFAULT_MIN_AGE_S = 120  # config default for sessions.min_age_s
 
 
+def launch_default_uri(uri: str, done: Callable[[bool], None]) -> None:
+    """Hand `uri` to its default app without blocking the main loop
+    (`launch_default_for_uri_async` resolves and spawns off the loop, possibly via
+    the portal); `done(ok)` runs from its callback."""
+    import gi
+    gi.require_version("Gio", "2.0")
+    from gi.repository import Gio
+
+    def finish(_src, result) -> None:
+        try:
+            ok = bool(Gio.AppInfo.launch_default_for_uri_finish(result))
+        except Exception:  # noqa: BLE001
+            ok = False
+        done(ok)
+
+    Gio.AppInfo.launch_default_for_uri_async(uri, None, None, finish)
+
+
 class Controller:
     def __init__(self, store, config, spend=None, *, run: tmux.Runner | None = None,
                  loop=None, clock: Callable[[], float] = time.time,
@@ -58,7 +76,8 @@ class Controller:
                  answerer: Callable[..., prompt_mod.AnswerResult] | None = None,
                  journal_runner: Callable[..., journal.JournalResult] | None = None,
                  notifier: Callable[[str, str, str, dict | None], None] | None = None,
-                 find_transcript: Callable[[str], Path | None] | None = None):
+                 find_transcript: Callable[[str], Path | None] | None = None,
+                 opener: Callable[[str, Callable[[bool], None]], None] | None = None):
         self.store, self.config, self.spend = store, config, spend
         self.loop = loop if loop is not None else default_loop()
         self.clock = clock
@@ -73,6 +92,7 @@ class Controller:
         self._answer = answerer or prompt_mod.answer
         self._run_journal = journal_runner or journal.run_journal
         self._notifier = notifier
+        self._opener = opener or launch_default_uri
         self._answering: set[str] = set()
         self._focusing: set[str] = set()
         self._closing_all = False
@@ -207,6 +227,28 @@ class Controller:
             return
         self.sessions.retitle(name)
         self.store.toast("Title re-read from tmux")
+
+    # ── files ──
+    def open_path(self, path: str) -> None:
+        full = Path(str(path or "")).expanduser()
+        name = full.name or str(path)
+
+        def failed() -> None:
+            self.store.toast(f"Couldn’t open {name}", error=True)
+
+        if not path or not full.exists():
+            failed()
+            return
+
+        def done(ok: bool) -> None:
+            if not ok:
+                log.warning("could not open %s", full)
+                self._post(failed)
+        try:
+            self._opener(full.as_uri(), done)
+        except Exception:  # noqa: BLE001 — never raise into the loop
+            log.exception("open_path %s failed", full)
+            failed()
 
     # ── close & journal (SP-1601..1603, SP-1609) ──
     def request_close(self, name: str) -> None:

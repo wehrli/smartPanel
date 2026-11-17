@@ -34,6 +34,12 @@ class Actions(Protocol):
     def new_session(self, directory: str) -> None: ...
     def answer_prompt(self, name: str, option: int, fingerprint: str) -> None: ...
 
+    # files
+    def open_path(self, path: str) -> None:
+        """Open a file (journal log, receipt) with the desktop's default app.
+        Asynchronous; a missing file or a failed launch toasts
+        'Couldn’t open <name>' instead of raising."""
+
     # settings
     def set_setting(self, key: str, value: Any) -> None: ...
     def list_start_folders(self) -> list[dict]:

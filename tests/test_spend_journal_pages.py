@@ -253,3 +253,12 @@ def test_journal_empty_state_follows_min_age():
     store.state.settings.values["sessions.min_age_s"] = 300
     store.touch("settings")
     assert "5 minutes" in page.empty._text.get_text()
+
+
+def test_journal_open_goes_through_actions_open_path(tmp_path):
+    receipt = tmp_path / "r.md"
+    receipt.write_text("x")
+    _mod, store, page = _journal()
+    store.mutate("journal", lambda j: setattr(j.entries[0], "path", str(receipt)))
+    page.detail.open_receipt.emit("clicked")
+    assert ("open_path", (str(receipt),)) in page.actions.calls

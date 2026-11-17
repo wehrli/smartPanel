@@ -260,6 +260,11 @@ class DemoController:
             self.store.toast("Couldn’t raise the terminal. Turn on re-attach in Settings.",
                              error=True, action={"label": "Settings", "page": "settings"})
 
+    def open_path(self, path: str) -> None:
+        """Simulated: says what would happen, launches nothing."""
+        name = os.path.basename(str(path or "").rstrip("/")) or str(path)
+        self.store.toast(f"Opened {name} in the default editor")
+
     def retitle_session(self, name: str) -> None:
         s = self._known(name)
         if s is None or self._busy(s):

@@ -33,6 +33,7 @@
       <arg type="u" name="option" direction="in"/>
       <arg type="s" name="fingerprint" direction="in"/>
     </method>
+    <method name="OpenPath"><arg type="s" name="path" direction="in"/></method>
     <method name="SetSetting"><arg type="s" name="key" direction="in"/><arg type="s" name="json_value" direction="in"/></method>
   </interface>
 </node>

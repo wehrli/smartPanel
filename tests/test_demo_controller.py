@@ -505,3 +505,11 @@ def test_each_demo_notification_has_its_own_key(monkeypatch):
     ctl._notify("a", "b", "info")
     ctl._notify("c", "d", "info")
     assert len(set(keys)) == 2
+
+
+def test_open_path_only_toasts():
+    store, ctl, *_ = demo_controller()
+    toasts = []
+    store.on_event(lambda e: toasts.append(e) if e.kind == "toast" else None)
+    ctl.open_path("~/dev/omdev/JOURNAL/2026-11.md")
+    assert [t.data["text"] for t in toasts] == ["Opened 2026-11.md in the default editor"]

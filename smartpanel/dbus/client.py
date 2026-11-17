@@ -49,6 +49,7 @@ SIGNATURES: dict[str, str] = {
     "CloseAll": "()",
     "RequestNewSession": "()",
     "NewSession": "(s)",
+    "OpenPath": "(s)",
     "AnswerPrompt": "(sus)",
     "SetSetting": "(ss)",
 }

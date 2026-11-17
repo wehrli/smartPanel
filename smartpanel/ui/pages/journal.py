@@ -214,7 +214,7 @@ class JournalPage(Gtk.Stack):
         sjcss.install()
         self.store, self.actions, self.config = store, actions, config
         self._exists = exists
-        self._launcher = launcher or self._launch
+        self._launcher = launcher or self._open_with_actions
         self._clock = clock
         self._selected: str | None = None
         self._pending: str | None = None
@@ -368,6 +368,15 @@ class JournalPage(Gtk.Stack):
             self._update_detail()
             return
         self._launcher(path)
+
+    def _open_with_actions(self, path: str) -> None:
+        """`actions.open_path` (async, toasts its own failure); a local
+        Gtk.FileLauncher only for an Actions without it."""
+        opener = getattr(self.actions, "open_path", None)
+        if callable(opener):
+            opener(path)
+        else:
+            self._launch(path)
 
     def _launch(self, path: str) -> None:
         launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(path))

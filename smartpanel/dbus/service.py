@@ -221,6 +221,7 @@ _ACTIONS: dict[str, tuple[str, Callable[[tuple], tuple]]] = {
     "RequestNewSession": ("request_new_session", lambda a: ()),
     "NewSession": ("new_session", lambda a: (a[0],)),
     "AnswerPrompt": ("answer_prompt", lambda a: (a[0], int(a[1]), a[2])),
+    "OpenPath": ("open_path", lambda a: (a[0],)),
     "SetSetting": ("set_setting", lambda a: (a[0], decode_setting(a[0], a[1]))),
 }
 

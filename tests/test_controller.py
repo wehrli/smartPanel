@@ -438,3 +438,33 @@ def test_notify_falls_back_to_the_original_send_signature(monkeypatch, h):
     h.store.on_event(events.append)
     button.callback()
     assert events[-1].kind == "open_dashboard" and events[-1].data == {"page": "journal:1"}
+
+
+def test_open_path_hands_the_file_to_the_opener(tmp_path):
+    opened = []
+    hh = Harness(tmp_path, opener=lambda uri, done: (opened.append(uri), done(True)))
+    f = tmp_path / "2026-11.md"
+    f.write_text("x")
+    hh.ctl.open_path(str(f))
+    assert opened == [f.as_uri()]
+    assert hh.toasts() == []
+
+
+def test_open_path_failure_and_missing_file_toast(tmp_path):
+    hh = Harness(tmp_path, opener=lambda uri, done: done(False))
+    f = tmp_path / "log.md"
+    f.write_text("x")
+    hh.ctl.open_path(str(f))
+    hh.ctl.open_path(str(tmp_path / "gone.md"))
+    assert [(t["text"], t["error"]) for t in hh.toasts()] == [
+        ("Couldn’t open log.md", True), ("Couldn’t open gone.md", True)]
+
+
+def test_open_path_opener_raising_never_escapes(tmp_path):
+    def boom(uri, done):
+        raise RuntimeError("no portal")
+    hh = Harness(tmp_path, opener=boom)
+    f = tmp_path / "log.md"
+    f.write_text("x")
+    hh.ctl.open_path(str(f))
+    assert hh.toasts()[0]["text"] == "Couldn’t open log.md"

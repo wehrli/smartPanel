@@ -97,9 +97,9 @@ def _open_log(path: str) -> Runner:
         if callable(opener):
             opener(path)
             return
-        # No Actions verb for "open a file" yet (see the WP report): hand the file to
-        # the desktop's default editor asynchronously, and land on the Journal page
-        # when there is nothing to open or the launch fails.
+        # An Actions without `open_path` (a stub): hand the file to the desktop's
+        # default editor asynchronously, and land on the Journal page when there
+        # is nothing to open or the launch fails.
         _launch_default(path, lambda: actions.open_dashboard("journal"))
     return run
 
