@@ -241,6 +241,10 @@ def test_garbled_env_is_ignored_and_not_an_override(path, caplog):
     assert cfg.get("swap.warn") == 65
 
 
+def test_unknown_key_reads_as_none():
+    assert Config().get("no.such.key") is None
+
+
 def test_overridden_by_none_for_keys_without_env(path):
     cfg = load(path, env={"SMARTPANEL_SWAP_WARN": "70"})
     assert cfg.overridden_by("bar.strip") is None

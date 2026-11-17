@@ -329,8 +329,9 @@ class Config:
 
     # ── public API ──
     def get(self, key: str) -> Any:
-        if key not in SPECS:
-            raise KeyError(f"unknown setting {key!r}")
+        if key not in SPECS:   # same as the wave-0 stub: unknown keys read as None
+            log.warning("unknown setting %r read", key)
+            return None
         if key == "swap.crit":  # effective crit is never below effective warn
             return max(self._raw("swap.crit"), self._raw("swap.warn"))
         return self._raw(key)
