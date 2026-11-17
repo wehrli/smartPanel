@@ -272,8 +272,10 @@ export default class SmartPanelHudExtension extends Extension {
         if (!this._online || !this._throttle)
             return;
         const urgent = Array.isArray(sections) && sections.includes('settings');
-        // Hidden HUD: only a settings change can make it matter again.
-        if (!urgent && !this._settings?.enabled)
+        // Hidden HUD: only a settings change can make it matter again. While the
+        // settings are still unknown (first GetState failed or not back yet), every
+        // Changed is a chance to learn them, so let it through.
+        if (!urgent && this._settings !== null && !this._settings.enabled)
             return;
         this._throttle.request({urgent});
     }
@@ -288,8 +290,14 @@ export default class SmartPanelHudExtension extends Extension {
                     this._apply(JSON.parse(json));
                 } catch (e) {
                     if (!(e instanceof GLib.Error &&
-                          e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)))
+                          e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))) {
                         logger.warn(`smartpanel-hud: GetState failed: ${e.message}`);
+                        // Never heard the settings: without a retry a HUD the user
+                        // turned on could stay blank until the next Changed. Queue a
+                        // throttled (non-urgent) retry; it replays after done().
+                        if (this._settings === null && this._online)
+                            this._throttle?.request();
+                    }
                 } finally {
                     done();
                 }

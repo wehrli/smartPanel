@@ -381,6 +381,45 @@ test('GetState errors are logged, never thrown; the throttle keeps working', asy
     ext.disable();
 });
 
+test('first GetState fails: a later Changed (any section) and a throttled retry still fetch', async () => {
+    await load();
+    const ext = newExtension();
+    const warn = mod.logger.warn;
+    mod.logger.warn = () => {};
+    try {
+        watch().appeared();
+        fake().calls[0].fail(new GLib.Error(Gio.IOErrorEnum, Gio.IOErrorEnum.TIMED_OUT, 'slow'));
+        eq(fake().calls.length, 0, 'retry waits for the throttle window');
+        // Changed for a non-settings section while settings are unknown is not dropped.
+        changed(['system']);
+        fakeMod.advance(5000);
+        eq(fake().calls.length, 1, 'second GetState after the failure');
+        fake().calls[0].reply(fixtureJson('busy'));
+        eq(hud().visible, true);
+    } finally {
+        mod.logger.warn = warn;
+    }
+    ext.disable();
+});
+
+test('first GetState fails and no Changed arrives: retried after the interval', async () => {
+    await load();
+    const ext = newExtension();
+    const warn = mod.logger.warn;
+    mod.logger.warn = () => {};
+    try {
+        watch().appeared();
+        fake().calls[0].fail(new GLib.Error(Gio.IOErrorEnum, Gio.IOErrorEnum.TIMED_OUT, 'slow'));
+        fakeMod.advance(5000);
+        eq(fake().calls.length, 1, 'retried without any signal');
+        fake().calls[0].reply(fixtureJson('busy'));
+        eq(hud().visible, true);
+    } finally {
+        mod.logger.warn = warn;
+    }
+    ext.disable();
+});
+
 test('disable: everything torn down, late replies are harmless', async () => {
     await load();
     const ext = newExtension();

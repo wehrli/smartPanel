@@ -58,7 +58,6 @@
 .smartpanel-hud-running    { color: #a9cdfa; }
 .smartpanel-hud-journaling { color: #e3a5ea; }
 .smartpanel-hud-idle,
-.smartpanel-hud-launching,
 .smartpanel-hud-unknown    { color: rgba(255, 255, 255, 0.6); }
 
 /* swap level, and the "tmux not installed" marker */
