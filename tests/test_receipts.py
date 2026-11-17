@@ -27,6 +27,7 @@ def test_index_lists_newest_first_including_unreadable(jdir):
         "20261117-150210-tacomap",
         "20261117-113846-giftswap-2",
         "20261012-225216-ledgerly",
+        "20260701-172909-tacomap-2",
     ]
 
 
@@ -63,6 +64,15 @@ def test_old_receipt_where_the_skill_did_not_run(jdir):
     assert e.duration_s == 504
     assert e.commands == ["ls; ls santasecretapi santasecretweb",
                           "cat internal/core/services/assignment_engine.go"]
+
+
+def test_legacy_summary_receipt_is_receipt_only(jdir):
+    # The oldest receipts used "## Summary" for the slot the skill fills now.
+    e = load_receipt(jdir / "20260701-172909-tacomap-2.md")
+    assert e.readable
+    assert e.outcome == "skill_failed"
+    assert "LLM summary unavailable" in e.confirmation
+    assert e.duration_s == 5 * 3600 + 34 * 60
 
 
 def test_broken_front_matter_is_listed_as_unreadable(jdir):

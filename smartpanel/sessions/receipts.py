@@ -164,9 +164,14 @@ def _unreadable(path: Path, when: float) -> JournalEntry:
 
 
 def _skill_section(body: str) -> tuple[str, str]:
-    """(confirmation line, outcome) from the "## `/journal`" section."""
+    """(confirmation line, outcome) from the "## `/journal`" section.
+
+    Receipts written before the skill route used a "## Summary" heading for the
+    same slot (an LLM summary, or "_(LLM summary unavailable …)_").
+    """
     lines = body.splitlines()
-    start = next((i for i, l in enumerate(lines) if l.startswith("## `")), None)
+    start = next((i for i, l in enumerate(lines)
+                  if l.startswith("## `") or l.strip() == "## Summary"), None)
     if start is None:
         return "", OUTCOME_UNKNOWN
     chunk: list[str] = []
