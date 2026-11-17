@@ -200,6 +200,7 @@ class JournalProgress:
     step: int = 0                        # index into JOURNAL_STEPS currently running
     failed: bool = False                 # the skill failed; the session still closes
     outcome: str | None = None           # OUTCOME_* once finished
+    headless: bool = False               # fallback route: step 1 reads "Resume the session headlessly"
 
 
 @dataclass
@@ -229,6 +230,7 @@ class SessionsState:
     tmux_ok: bool = True
     terminal_ok: bool = True
     updated_at: float | None = None
+    close_all: "Loading | None" = None   # "Close all" in flight: done of total sessions
 
     def count(self, activity: str) -> int:
         return sum(1 for s in self.items if s.activity == activity)

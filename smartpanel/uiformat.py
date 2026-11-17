@@ -106,3 +106,94 @@ def format_age(created_epoch: int, now: float) -> str:
         return f"{hours}h{rem:02d}m" if rem else f"{hours}h"
     days = hours // 24
     return f"{days}d"
+
+
+# ───────────────────────── v2 helpers (GTK-free copy shared by every surface) ─────────────────────────
+
+# Glyphs for the panel-owned phases, alongside ACTIVITY_STYLE's activity states.
+PHASE_STYLE: dict[str, tuple[str, str, str]] = {
+    "journaling": ("⏳", "#7d3c98", "Journaling, then closing"),
+    "launching": ("◌", "#7f8c8d", "Starting"),
+}
+
+
+def session_title(s) -> str:
+    """What to call a session anywhere (SP-1405): Claude's title, else the project.
+
+    Never empty and never "Claude Code": `tmux.clean_title` already turns
+    placeholders into "", so the project (then the tmux name) stands in.
+    """
+    title = (getattr(s, "title", "") or "").strip()
+    return title or getattr(s, "project", "") or getattr(s, "name", "") or "session"
+
+
+def format_minutes(seconds: float) -> str:
+    """120 -> '2 min', 90 -> '90 s' (for "Open under 2 min, so no journal.")."""
+    seconds = int(seconds or 0)
+    if seconds >= 60 and seconds % 60 == 0:
+        return f"{seconds // 60} min"
+    return f"{seconds} s"
+
+
+def format_waiting(since: float | None, now: float | None = None) -> str:
+    """'4m waiting', 'just now' style, for Board cards and Needs-you rows."""
+    if not since:
+        return ""
+    now = time.time() if now is None else now
+    secs = max(0, int(now - since))
+    if secs < 60:
+        return f"{secs}s waiting"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m waiting"
+    return f"{mins // 60}h{mins % 60:02d}m waiting"
+
+
+def option_button_label(index: int, option: str) -> str:
+    """'2 · Yes' for 'Yes, allow all edits this session' (labels cut at the first comma)."""
+    return f"{index + 1} · {option.split(',')[0].strip()}"
+
+
+def journal_step_text(step: int, project: str, *, headless: bool = False,
+                      monthly_log: str | None = None) -> str:
+    """One of state.JOURNAL_STEPS, filled in for this session."""
+    from smartpanel.state.model import JOURNAL_STEPS
+    step = max(0, min(step, len(JOURNAL_STEPS) - 1))
+    if step == 1 and headless:
+        return "Resume the session headlessly"
+    if step == 2 and monthly_log:
+        parts = monthly_log.rstrip("/").split("/")
+        short = "/".join(parts[-2:]) if len(parts) >= 2 else monthly_log
+        return f"Skill appends to {short}"
+    return JOURNAL_STEPS[step].format(project=project)
+
+
+def focus_message(result: str, title: str, reattach: bool = True) -> tuple[str, bool, dict | None]:
+    """(toast text, is_error, action) for a focus attempt (SP-1702)."""
+    if result == "raised":
+        return f"Raised the terminal for “{title}”", False, None
+    if result == "reattached":
+        return (f"Re-attached “{title}” in a new terminal. The old window closed.",
+                False, None)
+    settings = {"label": "Settings", "page": "settings"}
+    if reattach:
+        return (f"Couldn’t open a terminal for “{title}”. Install it, or set "
+                "SMARTPANEL_TERMINAL.", True, settings)
+    return "Couldn’t raise the terminal. Turn on re-attach in Settings.", True, settings
+
+
+def terminal_display_name(term: str) -> str:
+    """'terminator' -> 'Terminator' for user-facing copy."""
+    base = (term or "terminal").rsplit("/", 1)[-1]
+    return base[:1].upper() + base[1:]
+
+
+def home_path(path: str) -> str:
+    """'/home/user/dev/omdev/ledgerly' -> '~/dev/omdev/ledgerly'."""
+    import os
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
