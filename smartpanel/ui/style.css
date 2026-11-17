@@ -1,0 +1,138 @@
+/* smartPanel structure (SP-0008). Colours are var(--sp-*) custom properties
+ * emitted by ui/tokens.py for the current light/dark mode; never hard-code a
+ * colour here that should change with the mode. Loaded once per process. */
+
+/* ── type ── */
+.sp-mono, .sp-numeric {
+  font-family: var(--sp-mono);
+  font-feature-settings: "tnum";
+}
+.sp-cap {
+  font-size: 0.8em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--sp-muted);
+}
+.sp-muted { color: var(--sp-muted); }
+.sp-accent-text { color: var(--sp-accent-text); }
+
+/* ── sidebar ── */
+.sp-brand { font-weight: 700; }
+.sp-brand-mark {
+  background-color: var(--sp-accent);
+  border-radius: 5px;
+  min-width: 18px;
+  min-height: 18px;
+}
+.sp-nav row { border-radius: 8px; }
+.sp-nav-label { font-weight: 400; }
+.sp-nav row:selected .sp-nav-label { font-weight: 600; }
+.sp-badge {
+  font-size: 0.78em;
+  font-weight: 700;
+  border-radius: 99px;
+  padding: 1px 7px;
+  min-width: 8px;
+}
+.sp-badge.amber { background-color: var(--sp-badge-amber-bg); color: var(--sp-badge-amber-fg); }
+.sp-badge.red { background-color: var(--sp-badge-red-bg); color: var(--sp-badge-red-fg); }
+.sp-footer { padding: 8px 14px 12px 14px; }
+.sp-footer label { font-size: 0.86em; color: var(--sp-muted); }
+
+/* ── banner (Adw.Banner: banner > revealer > widget) ── */
+banner.sp-banner-warn > revealer > widget {
+  background-color: var(--sp-banner-warn-bg);
+  color: var(--sp-banner-warn-fg);
+}
+banner.sp-banner-crit > revealer > widget {
+  background-color: var(--sp-banner-crit-bg);
+  color: var(--sp-banner-crit-fg);
+}
+banner.sp-banner-warn button, banner.sp-banner-crit button {
+  background-color: alpha(currentColor, 0.18);
+  color: inherit;
+  font-weight: 600;
+}
+
+/* ── toasts (the Adw toast widget isn't addressable, so the overlay carries
+ *    the error class while an error toast is up) ── */
+toastoverlay.sp-toast-error > toast {
+  background-color: var(--sp-toast-err-bg);
+  color: var(--sp-toast-fg);
+}
+
+/* ── cards ── */
+.sp-card {
+  background-color: var(--sp-card);
+  border-radius: 12px;
+  border: 1px solid var(--sp-line);
+}
+.sp-metric-card { padding: 11px 12px; }
+.sp-metric-value {
+  font-size: 1.55em;
+  font-weight: 600;
+  font-feature-settings: "tnum";
+}
+.sp-metric-card.sp-na .sp-metric-value { color: var(--sp-muted); }
+.sp-level-warn {
+  border-color: var(--sp-level-warn);
+  box-shadow: inset 0 0 0 1px var(--sp-level-warn);
+}
+.sp-level-crit {
+  border-color: var(--sp-level-crit);
+  box-shadow: inset 0 0 0 1px var(--sp-level-crit);
+}
+
+/* ── activity glyphs and pills: colour is never the only signal; every glyph
+ *    has a distinct shape and an accessible name, every pill a word ── */
+.sp-glyph { font-weight: 700; min-width: 16px; }
+.sp-glyph-waiting { color: var(--sp-wait); }
+.sp-glyph-running { color: var(--sp-run); }
+.sp-glyph-idle, .sp-glyph-launching { color: var(--sp-idle); }
+.sp-glyph-journaling { color: var(--sp-jour); }
+
+.sp-pill {
+  font-size: 0.78em;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 99px;
+}
+.sp-pill-waiting { background-color: var(--sp-pill-waiting-bg); color: var(--sp-pill-waiting-fg); }
+.sp-pill-running { background-color: var(--sp-pill-running-bg); color: var(--sp-pill-running-fg); }
+.sp-pill-journaling { background-color: var(--sp-pill-journaling-bg); color: var(--sp-pill-journaling-fg); }
+.sp-pill-idle, .sp-pill-launching { background-color: var(--sp-btn); color: var(--sp-muted); }
+
+/* ── level chips ── */
+.sp-chip {
+  font-size: 0.78em;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+.sp-chip-ok { background-color: alpha(var(--sp-ok), 0.18); color: var(--sp-ok); }
+.sp-chip-warn { background-color: var(--sp-chip-warn-bg); color: var(--sp-chip-warn-fg); }
+.sp-chip-crit { background-color: var(--sp-chip-crit-bg); color: var(--sp-chip-crit-fg); }
+.sp-chip-na { background-color: var(--sp-btn); color: var(--sp-muted); }
+
+/* ── empty / error states ── */
+.sp-empty { padding: 32px 20px; }
+.sp-empty-icon {
+  background-color: var(--sp-card2);
+  border-radius: 18px;
+  min-width: 64px;
+  min-height: 64px;
+  font-size: 28px;
+}
+.sp-empty-title { font-size: 1.3em; font-weight: 700; }
+.sp-empty-text { color: var(--sp-muted); }
+
+/* ── track (budget / disk bars) ── */
+progressbar.sp-track > trough { min-height: 7px; border-radius: 9px; background-color: var(--sp-card2); }
+progressbar.sp-track > trough > progress { min-height: 7px; border-radius: 9px; background-color: var(--sp-accent); }
+progressbar.sp-track.sp-over > trough > progress { background-color: var(--sp-level-crit); }
+
+/* ── buttons in the accent ── */
+button.sp-accent {
+  background-color: var(--sp-accent);
+  color: #ffffff;
+}
