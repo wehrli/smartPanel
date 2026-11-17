@@ -16,7 +16,9 @@ import os
 import shlex
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 log = logging.getLogger(__name__)
 
@@ -46,14 +48,16 @@ def default_dir() -> Path:
 
 
 def terminal_argv(term: str = DEFAULT_TERMINAL, inner: str = "",
-                  workdir: str | None = None) -> list[str] | None:
+                  workdir: str | None = None,
+                  which: Callable[[str], str | None] | None = None) -> list[str] | None:
     """Full argv that opens `term` running the shell snippet `inner`.
 
     Shared by the new-session launcher and the focus fallback in `focus.py`, so
     both inherit the same two hard-won workarounds. Returns None if `term` is
     not installed.
     """
-    if shutil.which(term) is None:
+    which = which or shutil.which
+    if which(term) is None:
         log.warning("terminal %r not found on PATH", term)
         return None
     argv = [term]
@@ -71,43 +75,66 @@ def terminal_argv(term: str = DEFAULT_TERMINAL, inner: str = "",
     # and KillMode=control-group kills them on every restart/stop, taking the
     # terminal, the tmux server and every Claude session with it. A transient
     # scope moves the terminal into its own cgroup so sessions outlive the panel.
-    if shutil.which("systemd-run"):
+    if which("systemd-run"):
         argv = ["systemd-run", "--user", "--scope", "--collect", "--quiet", *argv]
     return argv
 
 
-def launch_session(cwd: str | os.PathLike | None = None,
-                   term: str = DEFAULT_TERMINAL) -> bool:
+# Launch outcomes (SP-1502). Strings so they travel over D-Bus unchanged.
+STARTED = "started"
+TERMINAL_MISSING = "terminal_missing"
+TMUX_MISSING = "tmux_missing"
+FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class LaunchResult:
+    status: str
+    message: str = ""
+    directory: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.status == STARTED
+
+
+def launch(cwd: str | os.PathLike | None = None, term: str = DEFAULT_TERMINAL, *,
+           which: Callable[[str], str | None] | None = None,
+           popen: Callable[..., object] | None = None,
+           script: Path | None = None) -> LaunchResult:
     """Open `term` running a new managed Claude tmux session in `cwd`.
 
-    Returns False (and logs) if the terminal isn't installed or the launcher
-    script is missing — callers surface this to the user.
+    Never raises: every way this can go wrong is a `LaunchResult` the UI can
+    word properly. tmux is checked first, because without it the terminal would
+    open, print an error and close — the worst way to find out.
     """
-    if shutil.which(term) is None:
-        log.warning("terminal %r not found on PATH", term)
-        return False
-
-    script = launcher_script()
-    if not script.exists():
-        log.warning("launcher script not found: %s", script)
-        return False
-
-    workdir = str(cwd) if cwd else str(Path.home())
+    which = which or shutil.which
+    popen = popen or subprocess.Popen
+    workdir = str(Path(cwd).expanduser()) if cwd else str(Path.home())
+    if which("tmux") is None:
+        return LaunchResult(TMUX_MISSING, "tmux is not installed", workdir)
+    if which(term) is None:
+        return LaunchResult(TERMINAL_MISSING, f"{term} is not on PATH", workdir)
+    script = script or launcher_script()
+    if not Path(script).exists():
+        return LaunchResult(FAILED, f"launcher script not found: {script}", workdir)
+    if not Path(workdir).is_dir():
+        return LaunchResult(FAILED, f"not a folder: {workdir}", workdir)
     argv = terminal_argv(term=term, inner=f"exec {shlex.quote(str(script))}",
-                         workdir=workdir)
+                         workdir=workdir, which=which)
     if argv is None:
-        return False
-
+        return LaunchResult(TERMINAL_MISSING, f"{term} is not on PATH", workdir)
     try:
-        subprocess.Popen(
-            argv,
-            start_new_session=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        log.info("launched %s session in %s", term, workdir)
-        return True
+        popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
+              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as e:
         log.warning("failed to launch %s: %s", term, e)
-        return False
+        return LaunchResult(FAILED, str(e), workdir)
+    log.info("launched %s session in %s", term, workdir)
+    return LaunchResult(STARTED, "", workdir)
+
+
+def launch_session(cwd: str | os.PathLike | None = None,
+                   term: str = DEFAULT_TERMINAL) -> bool:
+    """Bool wrapper over `launch` for the GTK3 dashboard (retired in v2)."""
+    return launch(cwd, term).ok
