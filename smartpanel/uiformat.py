@@ -150,8 +150,65 @@ def format_waiting(since: float | None, now: float | None = None) -> str:
 
 
 def option_button_label(index: int, option: str) -> str:
-    """'2 · Yes' for 'Yes, allow all edits this session' (labels cut at the first comma)."""
+    """'2 · Yes' for 'Yes, allow all edits this session' (labels cut at the first
+    comma). One option alone; `option_labels` keeps a whole prompt's distinct."""
     return f"{index + 1} · {option.split(',')[0].strip()}"
+
+
+OPTION_LABEL_MAX = 22
+OPTION_CLAUSE_WORDS = 3
+_LEADING_FILLER = ("yes", "and", "no", "but", "or", "then")
+
+
+def _cap(text: str, limit: int = OPTION_LABEL_MAX) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1].rstrip(" ,;:-")
+    space = cut.rfind(" ")
+    if space >= limit // 2:
+        cut = cut[:space].rstrip(" ,;:-")
+    return cut + "…"
+
+
+def _clause_after_comma(option: str) -> str:
+    """'Yes, allow all edits this session' -> 'Allow all edits'."""
+    _, _, rest = option.partition(",")
+    words = rest.replace(",", " ").split()
+    while words and words[0].lower().strip(".,;:") in _LEADING_FILLER:
+        words.pop(0)
+    clause = " ".join(words[:OPTION_CLAUSE_WORDS])
+    return clause[:1].upper() + clause[1:]
+
+
+def option_labels(options) -> list[str]:
+    """Short, *distinct* answer-button labels for a prompt's options.
+
+    Each option is cut at its first comma ('No, tell Claude…' -> 'No') unless that
+    repeats an earlier label; then the clause after the comma stands in, minus a
+    leading 'yes'/'and', capitalised and trimmed to three words
+    ('Yes, allow all edits this session' -> 'Allow all edits'). Labels are capped
+    at ~22 chars with an ellipsis. The full option text belongs in the tooltip.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for i, option in enumerate(options or ()):
+        option = " ".join(str(option or "").split())
+        candidates = [option.split(",")[0].strip()]
+        if "," in option:
+            candidates.append(_clause_after_comma(option))
+        candidates.append(option)
+        label = ""
+        for cand in candidates:
+            cand = _cap(cand)
+            if cand and cand.lower() not in seen:
+                label = cand
+                break
+        if not label:
+            label = _cap(f"{candidates[0] or 'Option'} ({i + 1})")
+        seen.add(label.lower())
+        out.append(label)
+    return out
 
 
 def journal_step_text(step: int, project: str, *, headless: bool = False,

@@ -76,8 +76,8 @@ PROMPT = Prompt("Do you want to make this edit to alerts.py?",
                  "No, tell Claude what to do differently"], cursor=1, fingerprint="fp")
 
 
-def test_option_labels_cut_at_first_comma():
-    assert m.option_labels(PROMPT) == ["1 · Yes", "2 · Yes", "3 · No"]
+def test_option_labels_are_numbered_and_distinct():
+    assert m.option_labels(PROMPT) == ["1 · Yes", "2 · Allow all edits", "3 · No"]
     assert m.option_labels(None) == []
 
 

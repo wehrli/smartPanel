@@ -93,6 +93,31 @@ def test_option_button_label_cuts_at_the_first_comma():
     assert U.option_button_label(1, "Yes, allow all edits this session") == "2 · Yes"
 
 
+def test_option_labels_edit_prompt_are_distinct():
+    from smartpanel.demo.scenarios import PROMPT_EDIT
+    assert U.option_labels(PROMPT_EDIT[1]) == ["Yes", "Allow all edits", "No"]
+
+
+def test_option_labels_question_prompt_are_capped():
+    from smartpanel.demo.scenarios import PROMPT_ASK
+    labels = U.option_labels(PROMPT_ASK[1])
+    assert labels == ["Down-migrate 0022…", "Apply on top of the…", "Skip 0023 for now"]
+    assert all(len(lb) <= U.OPTION_LABEL_MAX for lb in labels)
+    assert len(set(labels)) == len(labels)
+
+
+def test_option_labels_edge_cases():
+    assert U.option_labels([]) == []
+    assert U.option_labels(None) == []
+    # The clause after the comma is empty: the whole option, then a number.
+    assert U.option_labels(["Yes", "Yes, and", "Yes, and"]) == ["Yes", "Yes, and", "Yes (3)"]
+    # A leading "and" is stripped, and only the first three words kept.
+    assert U.option_labels(["Allow", "Allow, and remember for this project"]) == [
+        "Allow", "Remember for this"]
+    labels = U.option_labels(["A very long option without commas at all"])
+    assert labels == ["A very long option…"] and len(labels[0]) <= 22
+
+
 def test_journal_step_text():
     assert U.journal_step_text(1, "smartPanel") == "Type /journal smartPanel into the session"
     assert U.journal_step_text(1, "x", headless=True) == "Resume the session headlessly"

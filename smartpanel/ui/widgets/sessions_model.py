@@ -17,8 +17,9 @@ from dataclasses import dataclass
 from smartpanel.state.model import (IDLE, JOURNAL_STEPS, PHASE_JOURNALING, PHASE_LAUNCHING,
                                     RUNNING, UNKNOWN, WAITING)
 from smartpanel.uiformat import (format_waiting, home_path, journal_step_text,
-                                 option_button_label, session_title,
+                                 session_title,
                                  terminal_display_name)
+from smartpanel.uiformat import option_labels as short_option_labels
 
 # ───────────────────────── state words ─────────────────────────
 
@@ -127,10 +128,12 @@ def board_detail(s, now: float | None = None) -> str:
 # ───────────────────────── prompt ─────────────────────────
 
 def option_labels(prompt) -> list[str]:
-    """Answer buttons: '1 · Yes', '2 · Yes' (cut at the first comma), …"""
+    """Answer buttons: '1 · Yes', '2 · Allow all edits', '3 · No' — numbered,
+    short and distinct (`uiformat.option_labels`); the full text is the tooltip."""
     if prompt is None:
         return []
-    return [option_button_label(i, o) for i, o in enumerate(prompt.options)]
+    return [f"{i + 1} · {label}"
+            for i, label in enumerate(short_option_labels(prompt.options))]
 
 
 def prompt_lines(prompt) -> list[tuple[str, bool]]:

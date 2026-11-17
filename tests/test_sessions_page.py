@@ -117,7 +117,7 @@ def test_cockpit_cards_in_display_order():
     assert "Fix swap alert hysteresis" in text and "Needs you" in text
     assert "Do you want to make this edit to alerts.py?" in text
     assert "1. Yes" in text and "● attached" in text and "$2.90" in text
-    assert [b.get_label() for b in first.answer_buttons] == ["1 · Yes", "2 · Yes", "3 · No"]
+    assert [b.get_label() for b in first.answer_buttons] == ["1 · Yes", "2 · Allow all edits", "3 · No"]
     assert first.answer_buttons[0].has_css_class("suggested-action")
     assert not first.answer_buttons[1].has_css_class("suggested-action")
     assert first.has_css_class("sps-st-waiting")
