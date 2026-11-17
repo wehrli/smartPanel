@@ -16,7 +16,8 @@ Two things come out of here and nothing else:
 
 Both are pure functions of their inputs (the tracker owns only its own state),
 so the whole policy is testable without a display server. GTK/libnotify live in
-`notify.py`; the wiring lives in `indicator.py`.
+`notify.py`; the wiring lives in `collect/system.py` (`SystemCollector` owns the
+tracker and raises the notification).
 """
 from __future__ import annotations
 

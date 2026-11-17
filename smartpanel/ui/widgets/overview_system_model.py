@@ -259,8 +259,9 @@ def project_colors(names) -> dict[str, str]:
     Each name starts at its CRC32 slot and keeps it unless an earlier name (in
     sorted order, so the result doesn't depend on ranking) already took it; then
     it linear-probes to the next free slot. With more names than palette
-    entries the palette wraps. The Spend page should call this with the same
-    set so both pages agree.
+    entries the palette wraps. Only the Overview colours projects today
+    (Spend and Journal list them uncoloured, the HUD shows no project split);
+    any page that starts colouring them should call this with the same set.
     """
     n = len(PROJECT_PALETTE)
     used: set[int] = set()

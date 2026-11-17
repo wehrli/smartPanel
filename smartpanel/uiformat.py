@@ -1,15 +1,16 @@
-"""Presentation constants and pure label helpers shared by the tray menu
-(`indicator.py`) and the centered dashboard window (`dashboard.py`).
+"""Presentation constants and pure label helpers shared by the tray
+(`tray/barspec.py`), the session services and the dashboard's pages / widgets
+(`ui/`).
 
-Kept GTK-free so both importers avoid a circular dependency and so the helpers
+Kept GTK-free so every importer avoids a circular dependency and so the helpers
 stay unit-testable without a display server.
 """
 from __future__ import annotations
 
 import time
 
-# Emoji + display name per metric category, used as section headers in both
-# the tray menu and the dashboard window.
+# Emoji + display name per metric category (section headers of the v1 menu and
+# window; kept for themes and tests that still name them).
 SECTION_HEADERS: dict[str, str] = {
     "CLAUDE": "💰  Claude · today",
     "CPU": "🖥   CPU",

@@ -162,7 +162,7 @@ class SmartPanelApp(Adw.Application):
             command_line.printerr_literal(f"{e}\n")
             return 2
         # Only the invocation that starts the service sets its verbosity; a
-        # forwarded `smartpanel -v --palette` must not change the daemon's log level.
+        # forwarded `smartpanel -v --palette` must not change the service's log level.
         if (ns.verbose or ns.debug) and not remote and not self._wired:
             logging.getLogger().setLevel(cli.log_level(ns))
 

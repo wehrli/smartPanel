@@ -4,9 +4,7 @@
     format_top_bar(template, values)   -> a theme's `smartpanel.top_bar_format`
                                           rendered against `{CATEGORY: {METRIC: v}}`
 
-GTK-free so tests run without a display. (The v1 menu helpers that lived here, the
-block-char bars, sparklines and per-metric value formatting, went with the GTK 3
-indicator.)
+GTK-free so tests run without a display.
 """
 from __future__ import annotations
 

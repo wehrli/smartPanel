@@ -1,8 +1,8 @@
 """System sensors: CPU / MEMORY / SWAP / DISK / NET / BATTERY, via psutil.
 
 Every public function here returns `{METRIC: value}` and **never raises**: an
-unreadable value is `None` (rendered as "—"), never 0. The v1 indicator and the
-v2 `collect.system.SystemCollector` both read these.
+unreadable value is `None` (rendered as "—"), never 0. `collect.system.SystemCollector`
+reads these on its GLib timers.
 
 The pure parts (temperature source choice, the default-route parse, virtual
 interface filtering, per-interface rate maths) are split out so they can be

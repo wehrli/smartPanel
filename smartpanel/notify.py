@@ -58,8 +58,8 @@ Backends, tried in order:
 Tests build their own `Notifier(backend=..., banners_enabled=...)`; nothing in
 the test suite ever reaches a real notification daemon.
 
-Legacy form: `send(summary, body, urgency, key=...)` (the v1 indicator) still
-works — a first argument that isn't a known kind is treated as a summary.
+Short form: `send(summary, body, urgency, key=...)` (used by `app.py` for
+toasts when no window is showing) also works — a first argument that isn't a known kind is treated as a summary.
 A first argument that *looks* like a kind (`snake_case`) or an urgency outside
 low/normal/critical logs one WARNING per name, so a mistyped kind is visible.
 """

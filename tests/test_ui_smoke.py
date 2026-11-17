@@ -176,7 +176,7 @@ def test_window_routes_and_falls_back(shell):
     assert win.page == "overview"
     win.show_page("spend")
     assert win.nav.get_selected_row().page_name == "spend"
-    # every page builds (wave-1 placeholders) and is cached
+    # every page builds and is cached
     for p in ("overview", "sessions", "spend", "system", "journal", "settings"):
         assert win.show_page(p) is win.show_page(p)
 
@@ -389,7 +389,7 @@ def test_journal_confirm_autoconfirms(shell):
     assert ("close_session", ("claude-a", True)) in actions.calls
 
 
-def test_palette_placeholder_builds():
+def test_palette_builds():
     from smartpanel.ui.palette import PaletteWindow
     actions = RecordingActions()
     p = PaletteWindow(None, Store(), actions, FakeConfig())
