@@ -1,0 +1,360 @@
+system:
+  cpu:
+    percent: 23.0
+    temp_c: 61.0
+    cores: 8
+    history:
+    - 26.2
+    - 32.3
+    - 31.8
+    - 25.3
+    - 21.4
+    - 16.4
+    - 10.0
+    - 4.0
+    - 2.4
+    - 0.0
+    - 4.9
+    - 7.4
+    - 2.5
+    - 0.1
+    - 0.0
+    - 5.3
+    - 7.2
+    - 1.7
+    - 4.3
+    - 8.9
+    - 12.4
+    - 16.8
+    - 10.8
+    - 17.3
+    - 19.3
+    - 23.3
+    - 29.8
+    - 21.7
+    - 22.1
+    - 22.8
+  memory:
+    percent: 68.0
+    used_gb: 10.88
+    total_gb: 16.0
+    history:
+    - 68.1
+    - 68.6
+    - 69.9
+    - 71.2
+    - 70.3
+    - 68.9
+    - 69.6
+    - 69.6
+    - 69.2
+    - 68.0
+    - 69.4
+    - 68.8
+    - 67.7
+    - 69.1
+    - 69.1
+    - 70.2
+    - 70.5
+    - 69.0
+    - 70.0
+    - 68.8
+    - 67.4
+    - 67.6
+    - 67.3
+    - 68.0
+    - 66.9
+    - 67.4
+    - 66.5
+    - 67.9
+    - 67.6
+    - 67.6
+  swap:
+    percent: 12.0
+    used_gb: 0.96
+    total_gb: 8.0
+    level: 0
+    warn_at: 60.0
+    crit_at: 85.0
+    history:
+    - 11.6
+    - 11.6
+    - 11.3
+    - 10.8
+    - 11.3
+    - 11.5
+    - 11.9
+    - 11.5
+    - 11.8
+    - 11.9
+    - 11.8
+    - 11.5
+    - 11.3
+    - 11.3
+    - 11.5
+    - 11.3
+    - 11.4
+    - 11.4
+    - 11.3
+    - 11.3
+    - 11.6
+    - 11.8
+    - 11.6
+    - 11.8
+    - 12.3
+    - 12.8
+    - 12.5
+    - 12.0
+    - 11.9
+    - 11.9
+  disk:
+    mount: /
+    percent: 41.0
+    used_gb: 196.0
+    total_gb: 476.0
+  net:
+    down_bps: 2400000.0
+    up_bps: 180000.0
+    iface: wlp2s0
+    history_down:
+    - 200000.0
+    - 400000.0
+    - 300000.0
+    - 1200000.0
+    - 2800000.0
+    - 2100000.0
+    - 600000.0
+    - 400000.0
+    - 900000.0
+    - 2200000.0
+    - 3100000.0
+    - 2400000.0
+    history_up:
+    - 15000.0
+    - 30000.0
+    - 22500.0
+    - 90000.0
+    - 210000.0
+    - 157500.0
+    - 45000.0
+    - 30000.0
+    - 67500.0
+    - 165000.0
+    - 232500.0
+    - 180000.0
+  gpu:
+    available: false
+    vendor: null
+    percent: null
+    vram_used_gb: null
+    vram_total_gb: null
+    temp_c: null
+    history: []
+  updated_at: 1794925920.0
+spend:
+  cost_today: null
+  cost_week: null
+  cost_lifetime: null
+  tokens_today: 0
+  tokens_today_human: ''
+  burn_per_hour: null
+  cache_hit_pct: null
+  hourly_today:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  projects_today: []
+  models_today: []
+  praise_cost_today: 0.0
+  praise_echo_today: 0.0
+  days: []
+  forecast:
+    budget_usd: null
+    pct: null
+    eta: null
+    eta_reason: null
+    over_by_usd: 0.0
+  updated_at: null
+sessions:
+  items:
+  - name: claude-smartPanel
+    project: smartPanel
+    title: Fix swap alert hysteresis
+    cwd: ~/dev/omdev/smartPanel
+    attached: true
+    created: 1794922200.0
+    activity: waiting
+    phase: none
+    doing: null
+    prompt:
+      question: Do you want to make this edit to alerts.py?
+      options:
+      - 'Yes'
+      - Yes, allow all edits this session
+      - No, tell Claude what to do differently
+      cursor: 0
+      kind: permission
+      fingerprint: a76ca9faa445c506
+    waiting_since: 1794925680.0
+    cost_usd: 2.9
+    journal: null
+  - name: claude-tacomap
+    project: tacomap
+    title: Truck search filters
+    cwd: ~/dev/omdev/tacomap
+    attached: false
+    created: 1794923640.0
+    activity: running
+    phase: none
+    doing: Bash · npm test -- filters
+    prompt: null
+    waiting_since: null
+    cost_usd: 1.85
+    journal: null
+  - name: claude-JobScout
+    project: JobScout
+    title: Stripe webhook retries
+    cwd: ~/dev/omdev/JobScout
+    attached: false
+    created: 1794925200.0
+    activity: running
+    phase: none
+    doing: Waiting for 2 background agents
+    prompt: null
+    waiting_since: null
+    cost_usd: 1.88
+    journal: null
+  - name: claude-ledgerly
+    project: ledgerly
+    title: Migrate goose 0023
+    cwd: ~/dev/omdev/ledgerly
+    attached: false
+    created: 1794914520.0
+    activity: idle
+    phase: none
+    doing: null
+    prompt: null
+    waiting_since: null
+    cost_usd: 2.09
+    journal: null
+  tmux_ok: true
+  terminal_ok: true
+  updated_at: 1794925920.0
+journal:
+  entries:
+  - id: 2026-11-17-1202-tacomap
+    path: ~/.claude/smartpanel/journals/2026-11-17-1202-tacomap.md
+    time: 1794916920.0
+    title: Map clustering
+    project: tacomap
+    outcome: journaled
+    confirmation: Journaled tacomap to JOURNAL/2026-11.md. Map clustering moved to supercluster on the
+      web map; server-side tiles rejected for now.
+    duration_s: 9000
+    files:
+    - web/src/components/Map.tsx
+    - web/src/lib/cluster.ts
+    - web/package.json
+    commands:
+    - npm test -- map
+    - npm run build
+    tools:
+      Read: 14
+      Edit: 9
+      Bash: 6
+      Grep: 4
+    readable: true
+  - id: 2026-11-17-1124-JobScout
+    path: ~/.claude/smartpanel/journals/2026-11-17-1124-JobScout.md
+    time: 1794914640.0
+    title: Résumé parser
+    project: JobScout
+    outcome: timeout
+    confirmation: The /journal skill timed out after 300 s. The session was still closed; this receipt
+      holds the Activity section only.
+    duration_s: 5040
+    files:
+    - src/lib/resume/parse.ts
+    - src/lib/resume/parse.test.ts
+    commands:
+    - npm test -- resume
+    tools:
+      Read: 11
+      Edit: 6
+      Bash: 4
+    readable: true
+  - id: 2026-11-17-1036-smartPanel
+    path: ~/.claude/smartpanel/journals/2026-11-17-1036-smartPanel.md
+    time: 1794911760.0
+    title: Pricing table refresh
+    project: smartPanel
+    outcome: journaled
+    confirmation: Journaled smartPanel to JOURNAL/2026-11.md. pricing.py carries the 5.5 family; unknown
+      models still fall back to Opus rates.
+    duration_s: 7560
+    files:
+    - smartpanel/claude_stats/pricing.py
+    - tests/test_pricing.py
+    commands:
+    - pytest tests/test_pricing.py
+    tools:
+      Read: 8
+      Edit: 5
+      Bash: 3
+    readable: true
+  monthly_log_path: ~/dev/omdev/JOURNAL/2026-11.md
+app:
+  version: 0.1.0
+  loading:
+    done: 0
+    total: 1284
+  first_run: false
+  demo: cold
+  ticker_pinned: false
+  ticker_index: 0
+settings:
+  values:
+    bar.strip: true
+    bar.graphs: true
+    bar.text: true
+    bar.ticker: false
+    bar.ticker_seconds: 5
+    swap.warn: 60
+    swap.crit: 85
+    swap.hysteresis: 5
+    swap.repeat_s: 600
+    budget.daily_usd: null
+    notifications.budget: true
+    sessions.journal: true
+    sessions.min_age_s: 120
+    sessions.confirm_seconds: 5
+    sessions.reattach: true
+    sessions.dir: ~/dev/omdev
+    sessions.terminal: terminator
+    disk.mount: /
+    hud.enabled: false
+    hud.corner: top-right
+    appearance.style: system
+    palette.shortcut: <Ctrl><Alt>space
+  overridden_by: {}
