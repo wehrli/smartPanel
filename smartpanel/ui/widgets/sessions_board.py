@@ -47,6 +47,8 @@ class BoardCard(Gtk.Box):
         sub = Gtk.Box(spacing=8)
         sub.add_css_class("sps-bcard-sub")
         self.project = Gtk.Label(xalign=0, hexpand=True, ellipsize=3)
+        # Keep a readable stub of the project at narrow widths instead of a bare '…'.
+        self.project.set_width_chars(7)
         self.detail = Gtk.Label(xalign=1)
         sub.append(self.project)
         sub.append(self.detail)

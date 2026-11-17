@@ -32,7 +32,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from smartpanel.state.model import PHASE_LAUNCHING  # noqa: E402
 from smartpanel.ui.widgets import sessions_css  # noqa: E402
@@ -137,7 +137,10 @@ def confirm_close(window, store, actions, config, name: str):
         return GLib.SOURCE_CONTINUE
 
     if seconds > 0:
-        state["timer"] = GLib.timeout_add_seconds(1, tick)
+        # Millisecond timer, not timeout_add_seconds: second-granularity sources
+        # are coalesced and the first tick could fire early, auto-confirming
+        # before sessions.confirm_seconds have really passed (SP-1604).
+        state["timer"] = GLib.timeout_add(1000, tick)
     dialog.connect("response", lambda _d, r: finish(r))
     dialog.connect("closed", lambda *_: finish("cancel"))
     return _present(window, dialog)
@@ -246,6 +249,13 @@ def new_session(window, store, actions, config):
     hint = Gtk.Label(wrap=True, xalign=0)
     hint.add_css_class("sps-hint")
     box.append(hint)
+    # The path sits on its own unwrapped line, in monospace like the prototype's
+    # <code>, shortened from the left when long — never broken mid-path.
+    hint_path = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.START, visible=False,
+                          selectable=False)
+    hint_path.add_css_class("sps-hint")
+    hint_path.add_css_class("monospace")
+    box.append(hint_path)
     browse = Gtk.Button(label="Browse…", halign=Gtk.Align.START)
     browse.add_css_class("flat")
     browse.set_tooltip_text("Choose a folder outside this list")
@@ -272,10 +282,16 @@ def new_session(window, store, actions, config):
         path = selected_path()
         dialog.set_response_enabled("open", bool(path))
         text = folder_hint(path, terminal)
-        if path:  # keep the path on one line
-            short = home_path(path)
-            text = text.replace(short, short.replace("/", "/\u2060"))
-        hint.set_text(text)
+        short = home_path(path) if path else ""
+        cut = text.rfind(short) if short else -1
+        if cut > 0:
+            hint.set_text(text[:cut].rstrip())
+            hint_path.set_text(text[cut:])
+            hint_path.set_tooltip_text(path)
+            hint_path.set_visible(True)
+        else:
+            hint.set_text(text)
+            hint_path.set_visible(False)
         if path:
             dialog.set_default_response("open")
 

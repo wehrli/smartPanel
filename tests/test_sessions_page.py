@@ -207,6 +207,37 @@ def test_retitle_spinner_until_toast():
     assert not card.retitling and card.retitle_btn.get_sensitive()
 
 
+def test_retitle_ignores_unrelated_toasts():
+    page, store, actions = _page()
+    card = page.cards["claude-ledgerly"]
+    _button(card, "⟳ Title").emit("clicked")
+    card._retitle_started -= 10_000
+    store.toast("Sent “1” to Fix swap alert hysteresis")
+    store.toast("Copied sudo apt install tmux")
+    assert card.retitling
+    store.toast(f"Couldn’t re-read the title of {card.title.get_text()}", error=True)
+    assert not card.retitling
+    card.dispose_timers()
+
+
+def test_retitle_done_cancels_backstop_timer():
+    page, store, actions = _page()
+    card = page.cards["claude-ledgerly"]
+    _button(card, "⟳ Title").emit("clicked")
+    first = card._retitle_timer
+    assert first
+    card._retitle_started -= 10_000
+    card.retitle_done()
+    assert card._retitle_timer == 0
+    # the first backstop is gone from the main context, not merely forgotten
+    assert GLib.MainContext.default().find_source_by_id(first) is None
+    card.set_retitling(True)
+    second = card._retitle_timer
+    card.set_retitling(False)
+    assert card._retitle_timer == 0
+    assert GLib.MainContext.default().find_source_by_id(second) is None
+
+
 # ───────────────────────── toolbar / routing / states ─────────────────────────
 
 def test_toolbar_actions_and_view_switch():
@@ -395,8 +426,9 @@ def test_new_session_preselects_last_used_and_marks_running(shell, monkeypatch):
     assert d.get_response_enabled("open")
     labels = _labels(d.get_extra_child())
     assert "~/dev/omdev /" in labels and "●" in labels
-    assert any(t.startswith("Opens Terminator running Claude inside tmux, in /⁠tmp/⁠b")
-               for t in labels)
+    assert "Opens Terminator running Claude inside tmux, in" in labels
+    # the path sits whole on its own unwrapped line, slashes intact
+    assert any(t.startswith("/tmp/") and "\u2060" not in t for t in labels)
     d.force_close()
 
 

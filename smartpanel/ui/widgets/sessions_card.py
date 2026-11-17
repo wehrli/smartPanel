@@ -303,14 +303,14 @@ class CockpitCard(Gtk.Box):
             self._clear_retitle_timer()
             self._retitle_timer = GLib.timeout_add(RETITLE_MAX_MS, self._retitle_off)
         else:
-            self._retitle_off()
+            self._stop_retitle()
 
     def retitle_done(self) -> None:
         if not self.retitle_spinner.get_visible():
             return
         shown = GLib.get_monotonic_time() / 1000 - self._retitle_started
         if shown >= RETITLE_MIN_MS:
-            self._retitle_off()
+            self._stop_retitle()
         else:
             self._clear_retitle_timer()
             self._retitle_timer = GLib.timeout_add(int(RETITLE_MIN_MS - shown),
@@ -325,7 +325,14 @@ class CockpitCard(Gtk.Box):
             GLib.source_remove(self._retitle_timer)
             self._retitle_timer = 0
 
+    def _stop_retitle(self) -> None:
+        """End the ⟳ feedback now, cancelling any pending backstop timer so a
+        stale one can't cut short the next re-read."""
+        self._clear_retitle_timer()
+        self._retitle_off()
+
     def _retitle_off(self) -> bool:
+        # Timer callback: the source is being removed by returning SOURCE_REMOVE.
         self._retitle_timer = 0
         self.retitle_spinner.set_visible(False)
         self.retitle_btn.set_sensitive(True)

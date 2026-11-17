@@ -47,6 +47,13 @@ AGE_TICK_S = 15
 RETITLE_TOAST = "Title re-read from tmux"
 
 
+def retitle_outcome_for(text: str, error: bool, name: str, title: str) -> bool:
+    """Does a toast answer a ⟳ Title on session `name` (shown as `title`)?"""
+    if text == RETITLE_TOAST:
+        return True
+    return error and any(k and k in text for k in (name, title))
+
+
 def _state_icon(glyph: str) -> Gtk.Widget:
     box = Gtk.Box(halign=Gtk.Align.CENTER, accessible_role=Gtk.AccessibleRole.PRESENTATION)
     box.add_css_class("sp-empty-icon")
@@ -228,10 +235,15 @@ class SessionsPage(Gtk.Box):
     def _on_event(self, event) -> None:
         if event.kind != "toast":
             return
-        # Any toast ends a ⟳ in flight: the controller answers a re-title with
-        # "Title re-read from tmux", or with an error toast when it couldn't.
-        for card in self.cards.values():
-            if card.retitling:
+        # Only the re-title outcome ends a ⟳ in flight: the controller answers
+        # with "Title re-read from tmux", or with an error toast naming the
+        # session. Unrelated toasts (answers, journals, copies) are ignored;
+        # RETITLE_MAX_MS is the backstop when no outcome ever arrives.
+        data = event.data or {}
+        text = str(data.get("text") or "")
+        for name, card in self.cards.items():
+            if card.retitling and retitle_outcome_for(text, bool(data.get("error")),
+                                                      name, card.title.get_text()):
                 card.retitle_done()
 
     def _ctx(self) -> CardContext:
