@@ -15,7 +15,8 @@ import Gio from 'gi://Gio';
 import {dirOf, eq, ok, readJson, readText, run, test} from './harness.js';
 
 const HERE = dirOf(import.meta.url);
-const SRC = `${HERE}/../../extension/smartpanel-hud@omdev.dev`;
+// SMARTPANEL_HUD_EXT_DIR lets the pytest wrapper prove a broken copy fails this check.
+const SRC = GLib.getenv('SMARTPANEL_HUD_EXT_DIR') ?? `${HERE}/../../extension/smartpanel-hud@omdev.dev`;
 const FIX = `${HERE}/../fixtures/hud`;
 
 const REWRITE = {
