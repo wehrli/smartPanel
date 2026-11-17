@@ -1,0 +1,11 @@
+● Both fixes are in: the hysteresis now uses the boundary it crossed, and the
+  repeat timer resets when the level drops.
+
+  Do you want me to commit those two files?
+
+✻ Brewed for 48s · done 3:12 PM
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)

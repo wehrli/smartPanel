@@ -165,6 +165,20 @@ def send_enter(name: str, run: Runner = _run) -> bool:
     return rc == 0
 
 
+def send_keys(name: str, keys: list[str], run: Runner = _run) -> bool:
+    """Press named keys (`Up`, `Down`, `Enter`…) in the session's active pane.
+
+    Unlike `send_text` there is no `-l`: these are tmux key names, not text.
+    One call for the whole sequence, so nothing can land between the keys.
+    """
+    if not keys:
+        return True
+    rc, _, err = run(["send-keys", "-t", f"={name}:", *keys])
+    if rc != 0:
+        log.warning("send-keys %s to %s failed: %s", keys, name, err.strip())
+    return rc == 0
+
+
 def set_terminal_title(name: str, text: str, run: Runner = _run) -> bool:
     """Set the terminal window title tmux shows while this session is attached.
 

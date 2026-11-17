@@ -1,0 +1,17 @@
+● I'll clear the stale build output before rebuilding.
+
+● Bash(rm -rf build/ && npm run build)
+  ⎿  Running…
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Bash command                                                                 │
+│                                                                              │
+│   rm -rf build/ && npm run build                                             │
+│   Remove the stale build directory and rebuild                               │
+│                                                                              │
+│ Do you want to proceed?                                                      │
+│ ❯ 1. Yes                                                                     │
+│   2. Yes, and don't ask again for npm run build commands in                  │
+│      /home/user/dev/omdev/tacomap                                            │
+│   3. No, and tell Claude what to do differently (esc)                        │
+╰──────────────────────────────────────────────────────────────────────────────╯

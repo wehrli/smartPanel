@@ -114,16 +114,44 @@ def _has_confirm_footer(lines: Sequence[str]) -> bool:
     return any(_OPTION_CURSOR.match(line) for line in lines)
 
 
+# A horizontal rule: the input box is drawn between two of these.
+_RULE = re.compile(r"^\s*[─━═╌-]{10,}\s*$")
+# The empty input box ("❯" alone) and an assistant bullet: neither is ever drawn
+# *below* a live choice list, because a modal replaces the input area.
+_BARE_PROMPT = re.compile(r"^\s*[❯>]\s*$")
+_BULLET = re.compile(r"^[●⏺]\s")  # column 0: the agents list indents its own ●
+
+
+def is_rule(line: str) -> bool:
+    return bool(_RULE.match(line))
+
+
 def _has_choice_box(lines: Sequence[str]) -> bool:
-    cursor = False
+    cursor_at = -1
     numbers: set[str] = set()
-    for line in lines:
+    for i, line in enumerate(lines):
         if _CHOICE_CURSOR.match(line):
-            cursor = True
+            cursor_at = i
         m = _CHOICE_OPTION.match(line)
         if m:
             numbers.add(m.group(1))
-    return cursor and len(numbers) >= _MIN_CHOICES
+    if cursor_at < 0 or len(numbers) < _MIN_CHOICES:
+        return False
+    return not _is_user_text(lines, cursor_at)
+
+
+def _is_user_text(lines: Sequence[str], cursor_at: int) -> bool:
+    """True when a "❯ 1. …" list is the user's own words, not a choice box.
+
+    Two shapes, both from real panes: a submitted message is echoed as
+    "❯ 1. fix …" and Claude's answer plus a fresh input box follow it; a draft
+    still in the input box sits directly under the box's top rule. A live modal
+    replaces the input area, so neither can happen under a real prompt.
+    """
+    if cursor_at > 0 and is_rule(lines[cursor_at - 1]):
+        return True
+    return any(_BARE_PROMPT.match(line) or _BULLET.match(line)
+               for line in lines[cursor_at + 1:])
 
 
 def activity_of(name: str, run: Runner = _run) -> str:
