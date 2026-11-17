@@ -37,6 +37,11 @@ def _present(window, dialog):
     return dialog
 
 
+def _nobreak(command: str) -> str:
+    """Keep a command on one line: no break after '/' or at its space."""
+    return command.replace("/", "/\u2060").replace(" ", "\u00a0")
+
+
 def journal_button_label(seconds_left: int) -> str:
     return f"Journal & close ({seconds_left})" if seconds_left > 0 else "Journal & close"
 
@@ -52,8 +57,8 @@ def confirm_close(window, store, actions, config, name: str):
     project = session.project or session.name
     dialog = Adw.AlertDialog(
         heading=f"Journal “{title}” before closing?",
-        body=(f"It has been open {age}. smartPanel types /journal {project} into the "
-              f"session, waits for the entry, then closes it."))
+        body=(f"It has been open {age}. smartPanel types {_nobreak('/journal ' + project)} "
+              f"into the session, waits for the entry, then closes it."))
     seconds = int(config.get("sessions.confirm_seconds") or 0) if config else 0
     dialog.add_response("without", "Close without")
     dialog.add_response("journal", journal_button_label(seconds))

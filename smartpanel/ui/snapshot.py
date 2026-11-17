@@ -10,6 +10,11 @@ the user's screen and it works over SSH. `--on-display` uses the current display
 instead. The capture itself is `Gtk.WidgetPaintable` → `Gtk.Snapshot` → the
 window's own `Gsk.Renderer.render_texture` → PNG.
 
+Broadway limitation: its frame clock stalls without a browser attached, so a
+transition that starts after the first frames never finishes there. That
+includes Adw dialogs, which stay invisible; snapshot those with `--on-display`.
+Animations are switched off in both modes so captures are deterministic.
+
 Never touches the running instance: a separate, non-unique application id, no
 D-Bus export, no collectors, no window-state persistence.
 """
@@ -138,6 +143,18 @@ def capture(widget, path: str | Path) -> bool:
     return bool(texture.save_to_png(str(path)))
 
 
+def disable_animations() -> None:
+    """Jump every transition to its end state. Needed on Broadway, whose frame
+    clock stalls without a browser attached (dialogs would stay invisible), and
+    it makes snapshots deterministic anyway."""
+    import gi
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+    settings = Gtk.Settings.get_default()
+    if settings is not None:
+        settings.set_property("gtk-enable-animations", False)
+
+
 class _InertActions:
     """Actions for a snapshot without --demo: every verb does nothing."""
 
@@ -186,6 +203,7 @@ def snapshot(target: str, out: str | Path, *, state=None, demo: str | None = Non
         app.quit()
 
     def activate(a):
+        disable_animations()
         tokens.install()
         Adw.StyleManager.get_default().set_color_scheme(tokens.color_scheme_for(style))
         if target == "gallery":
