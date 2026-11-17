@@ -188,8 +188,6 @@ class SmartPanelApp(Adw.Application):
 
         self.theme = load_theme(cli.resolve_theme(ns.theme))
         self.config = Config.load()
-        if hasattr(self.config, "bind_store"):
-            self.config.bind_store(self.store)
 
         self._apply_style(self.config.get("appearance.style"))
         self._unsubs.append(self.config.subscribe(self._on_setting))
@@ -203,22 +201,33 @@ class SmartPanelApp(Adw.Application):
                 state.app.version = __version__
             self.store.state = state
             self.store.touch("app")
-            controller = demo.DemoController(self.store, self.config)
-            self._services.append(controller)
         else:
             self.store.update("app", version=__version__)
+        # After the demo state swap (so the settings section it fills survives)
+        # and before anything starts reading the store.
+        if hasattr(self.config, "bind_store"):
+            self.config.bind_store(self.store)
+
+        if ns.demo:
+            controller = demo.DemoController(self.store, self.config)
+            started = [controller]
+        else:
             from smartpanel.collect.system import SystemCollector
             from smartpanel.services.controller import Controller
             from smartpanel.services.spend import SpendService
             collector = SystemCollector(self.store, self.config, self.theme)
             spend = SpendService(self.store, self.config)
             controller = Controller(self.store, self.config, spend)
-            self._services += [collector, spend, controller]
-            for svc in (collector, spend, controller):
-                try:
-                    svc.start()
-                except Exception:  # noqa: BLE001 — degrade, never die at startup
-                    log.exception("failed to start %s", type(svc).__name__)
+            started = [collector, spend, controller]
+        self._services += started
+        for svc in started:
+            start = getattr(svc, "start", None)
+            if not callable(start):
+                continue
+            try:
+                start()
+            except Exception:  # noqa: BLE001 — degrade, never die at startup
+                log.exception("failed to start %s", type(svc).__name__)
         self.actions.target = controller
         self._wired = True
         self._start_tray()

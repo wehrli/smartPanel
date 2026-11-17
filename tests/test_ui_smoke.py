@@ -370,3 +370,24 @@ def test_app_routes_events_without_a_window(monkeypatch):
     app._on_event(Event("toast", {"text": "Journal written", "error": False}))
     assert sent and sent[0][0][1] == "Journal written"
     assert sent[0][1]["urgency"] == "normal"
+
+
+def test_demo_wiring(monkeypatch, tmp_path):
+    from smartpanel import cli
+    from smartpanel.app import SmartPanelApp
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    app = SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
+    app._wire(cli.parse_args(["--demo", "busy"]))
+    assert app.store.state.app.demo == "busy"
+    assert app.store.state.app.version
+    assert app.actions.target is not None
+    assert app.tray is None            # no D-Bus connection in a test: no tray
+    seen = []
+    monkeypatch.setattr(app, "show_dashboard", lambda page="": seen.append(("dash", page)))
+    monkeypatch.setattr(app, "show_palette", lambda: seen.append(("palette",)))
+    app.store.emit(Event("open_dashboard", {"page": "journal:x"}))
+    app.store.emit(Event("open_palette", {}))
+    assert seen == [("dash", "journal:x"), ("palette",)]
+    app._run_request(cli.Request("dashboard", "spend"))
+    assert seen[-1] == ("dash", "spend")
