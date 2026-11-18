@@ -33,7 +33,7 @@ PALETTE_ARG = "--palette"
 PALETTE_NAME = "smartPanel command palette"
 
 
-def palette_command(*, which=shutil.which, python: str | None = None,
+def palette_command(*, which=None, python: str | None = None,
                     package_dir: str | None = None) -> str:
     """The command the keybinding runs, as an absolute path that works from GNOME.
 
@@ -42,7 +42,7 @@ def palette_command(*, which=shutil.which, python: str | None = None,
     `smartpanel --palette` would silently do nothing. Prefer a real console
     script when one resolves; otherwise run this interpreter on this checkout.
     """
-    exe = which("smartpanel")
+    exe = (which or shutil.which)("smartpanel")  # looked up per call, so tests can patch it
     if exe:
         return f"{shlex.quote(os.path.abspath(exe))} {PALETTE_ARG}"
     python = python or sys.executable

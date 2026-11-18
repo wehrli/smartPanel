@@ -290,7 +290,7 @@ def test_list_start_folders(tmp_path):
                  config={"sessions.dir": str(base)})
     hh.ctl.start()
     out = hh.ctl.list_start_folders()
-    assert [f["name"] for f in out] == ["apple", "Tacomap", "ledgerly", "webapp"]
+    assert [f["name"] for f in out] == ["apple", "ledgerly", "Tacomap", "webapp"]
     assert [f["has_session"] for f in out] == [False, False, False, True]
     assert out[0]["path"] == str(base / "apple")
 
