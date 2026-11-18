@@ -10,14 +10,20 @@ importing it loads GTK through the package `__init__`; nothing here uses it.
 """
 from __future__ import annotations
 
+import json
+import logging
+import os
 import time
 import zlib
 from dataclasses import dataclass
+from pathlib import Path
 
 from smartpanel.state.model import (LEVEL_CRITICAL, LEVEL_OK, LEVEL_WARNING,
                                     PHASE_JOURNALING, PHASE_LAUNCHING, WAITING,
                                     DiskState, GpuState, MemoryState, NetState, Session,
                                     SpendState, SwapState)
+
+log = logging.getLogger(__name__)
 
 DASH = "—"
 
@@ -253,27 +259,86 @@ def _slot(name: str) -> int:
     return zlib.crc32(name.encode("utf-8")) % len(PROJECT_PALETTE)
 
 
-def project_colors(names) -> dict[str, str]:
-    """Distinct colours for the projects shown together.
+class ProjectColors:
+    """Sticky name -> palette slot assignments (SP-0807).
 
-    Each name starts at its CRC32 slot and keeps it unless an earlier name (in
-    sorted order, so the result doesn't depend on ranking) already took it; then
-    it linear-probes to the next free slot. With more names than palette
-    entries the palette wraps. Only the Overview colours projects today
-    (Spend and Journal list them uncoloured, the HUD shows no project split);
-    any page that starts colouring them should call this with the same set.
+    A project's colour must not depend on which other projects spent money that
+    day, so a slot, once given, is kept for good. A new name starts at its CRC32
+    slot and linear-probes past slots that already belong to *any* known
+    project; once every slot is taken, past the ones held by the projects shown
+    alongside it; failing both it keeps its CRC32 slot. Names new in one call
+    are assigned in sorted order, so the result doesn't depend on ranking.
+
+    `path` (optional) persists the map as JSON so colours also survive a
+    restart; it is read once and rewritten only when a new name is assigned.
+    Never raises on a bad or unwritable file.
     """
-    n = len(PROJECT_PALETTE)
-    used: set[int] = set()
-    out: dict[str, str] = {}
-    for name in sorted(set(names)):
-        slot = _slot(name)
-        if len(used) < n:
-            while slot in used:
-                slot = (slot + 1) % n
-        used.add(slot)
-        out[name] = PROJECT_PALETTE[slot]
-    return out
+
+    def __init__(self, path: str | os.PathLike | None = None):
+        self.path = Path(path) if path else None
+        self._slots: dict[str, int] = self._load()
+
+    def _load(self) -> dict[str, int]:
+        if self.path is None:
+            return {}
+        try:
+            data = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        n = len(PROJECT_PALETTE)
+        return {str(k): v for k, v in data.items()
+                if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < n}
+
+    def _save(self) -> None:
+        if self.path is None:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._slots, sort_keys=True))
+            tmp.replace(self.path)
+        except OSError:
+            log.warning("could not save project colours to %s", self.path, exc_info=True)
+
+    def _pick(self, name: str, shown: set[str]) -> int:
+        n = len(PROJECT_PALETTE)
+        start = _slot(name)
+        for avoid in (set(self._slots.values()),
+                      {self._slots[x] for x in shown if x in self._slots}):
+            if len(avoid) < n:
+                slot = start
+                while slot in avoid:
+                    slot = (slot + 1) % n
+                return slot
+        return start
+
+    def colors(self, names) -> dict[str, str]:
+        names = set(names)
+        new = sorted(x for x in names if x not in self._slots)
+        for name in new:
+            self._slots[name] = self._pick(name, names)
+        if new:
+            self._save()
+        return {x: PROJECT_PALETTE[self._slots[x]] for x in names}
+
+
+_PROJECT_COLORS = ProjectColors()
+
+
+def use_project_colors(registry: ProjectColors) -> None:
+    """Swap the process-wide registry (e.g. for one persisted in the state dir)."""
+    global _PROJECT_COLORS
+    _PROJECT_COLORS = registry
+
+
+def project_colors(names, registry: ProjectColors | None = None) -> dict[str, str]:
+    """Colours for the projects shown together: distinct while the palette
+    lasts, and each one stable across pages and days (see ProjectColors). Only
+    the Overview colours projects today; any page that starts colouring them
+    should go through this too."""
+    return (registry or _PROJECT_COLORS).colors(names)
 
 
 @dataclass(frozen=True)
@@ -284,11 +349,12 @@ class ProjectBar:
     fraction: float        # of the largest row
 
 
-def project_bars(projects, limit: int = MAX_PROJECT_ROWS) -> list[ProjectBar]:
+def project_bars(projects, limit: int = MAX_PROJECT_ROWS,
+                 registry: ProjectColors | None = None) -> list[ProjectBar]:
     """Largest first, at most `limit` rows plus one 'others' row for the rest."""
     items = sorted((p for p in projects if p.cost_usd > 0), key=lambda p: -p.cost_usd)
     shown = items[:limit]
-    colors = project_colors(p.name for p in shown)
+    colors = project_colors((p.name for p in shown), registry)
     rows = [(p.name, p.cost_usd, colors[p.name]) for p in shown]
     rest = items[limit:]
     if rest:

@@ -146,9 +146,50 @@ def test_project_colours_are_distinct_among_shown_rows():
     assert "#e66100" not in m.PROJECT_PALETTE
     # the resolver is independent of ranking order, so Spend can share it
     names = [b.name for b in bars]
-    assert m.project_colors(names) == m.project_colors(reversed(names))
-    assert len(set(m.project_colors(sc.PROJECTS).values())) == min(
+    assert m.project_colors(names, m.ProjectColors()) == \
+        m.project_colors(reversed(names), m.ProjectColors())
+    assert len(set(m.project_colors(sc.PROJECTS, m.ProjectColors()).values())) == min(
         len(set(sc.PROJECTS)), len(m.PROJECT_PALETTE))
+
+
+def test_project_colour_does_not_depend_on_the_other_projects_that_day():
+    # SP-0807: smartPanel and tacomap share a CRC32 slot. A busy day used to
+    # push smartPanel to the next colour; a quiet day without tacomap gave
+    # it its own slot back, so the same project changed colour between days.
+    assert m._slot("smartPanel") == m._slot("tacomap")
+    reg = m.ProjectColors()
+    busy = reg.colors(["tacomap", "ledgerly", "JobScout", "smartPanel"])
+    quiet = reg.colors(["ledgerly", "smartPanel"])
+    alone = reg.colors(["smartPanel"])
+    assert busy["smartPanel"] == quiet["smartPanel"] == alone["smartPanel"]
+    assert busy["tacomap"] != busy["smartPanel"]                  # still distinct
+    # and the other way round: first seen alone, then with the colliding one
+    reg2 = m.ProjectColors()
+    first = reg2.colors(["smartPanel"])["smartPanel"]
+    later = reg2.colors(["tacomap", "smartPanel"])
+    assert later["smartPanel"] == first and later["tacomap"] != first
+
+
+def test_project_colours_persist_across_restarts(tmp_path):
+    path = tmp_path / "state" / "project-colors.json"
+    a = m.ProjectColors(path).colors(["tacomap", "smartPanel"])
+    b = m.ProjectColors(path).colors(["smartPanel"])              # a new process
+    assert b["smartPanel"] == a["smartPanel"]
+    path.write_text("not json")
+    assert m.ProjectColors(path).colors(["x"])["x"] in m.PROJECT_PALETTE  # never raises
+    ro = tmp_path / "ro"
+    ro.write_text("")                                             # a file, not a dir
+    assert m.ProjectColors(ro / "c.json").colors(["y"])["y"] in m.PROJECT_PALETTE
+
+
+def test_project_colours_fall_back_when_the_palette_is_full():
+    reg = m.ProjectColors()
+    many = [f"p{i}" for i in range(len(m.PROJECT_PALETTE) + 4)]
+    for name in many:                       # seen one per day: fills every slot
+        reg.colors([name])
+    shown = reg.colors(many[:3] + ["late"])
+    assert len(set(shown.values())) == 4    # still distinct among the shown rows
+    assert reg.colors(["late"])["late"] == shown["late"]
 
 
 def test_project_bars_largest_first_with_others():
