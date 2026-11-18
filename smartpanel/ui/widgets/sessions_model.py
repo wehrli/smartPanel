@@ -127,13 +127,43 @@ def board_detail(s, now: float | None = None) -> str:
 
 # ───────────────────────── prompt ─────────────────────────
 
+# The Cockpit's answer buttons sit in a wrapping row, so they can afford more
+# than the tray's ~22 characters: a no-comma option cut there ('Apply on top of
+# the…') no longer says what it does (SP-1305).
+COCKPIT_LABEL_MAX = 36
+
+
+def _cockpit_label(option: str, short: str, taken: set[str]) -> str:
+    """`short` (uiformat's tray-sized label), widened back to the option's first
+    clause when uiformat only cut it for length and the clause fits."""
+    if not short.endswith("…"):
+        return short
+    clause = " ".join(str(option or "").split(",")[0].split())
+    if not clause or clause.lower() in taken:
+        return short
+    if len(clause) <= COCKPIT_LABEL_MAX:
+        return clause
+    cut = clause[:COCKPIT_LABEL_MAX - 1]
+    space = cut.rfind(" ")
+    if space >= COCKPIT_LABEL_MAX // 2:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:-") + "…"
+
+
 def option_labels(prompt) -> list[str]:
     """Answer buttons: '1 · Yes', '2 · Allow all edits', '3 · No' — numbered,
-    short and distinct (`uiformat.option_labels`); the full text is the tooltip."""
+    short and distinct (`uiformat.option_labels`), cut at the first comma; a
+    clause without one keeps up to COCKPIT_LABEL_MAX characters. The full text
+    is the tooltip."""
     if prompt is None:
         return []
-    return [f"{i + 1} · {label}"
-            for i, label in enumerate(short_option_labels(prompt.options))]
+    shorts = short_option_labels(prompt.options)
+    labels: list[str] = []
+    for i, short in enumerate(shorts):
+        taken = {x.lower() for j, x in enumerate(shorts) if j != i} | \
+            {x.lower() for x in labels}
+        labels.append(_cockpit_label(prompt.options[i], short, taken))
+    return [f"{i + 1} · {label}" for i, label in enumerate(labels)]
 
 
 def prompt_lines(prompt) -> list[tuple[str, bool]]:

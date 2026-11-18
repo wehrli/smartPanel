@@ -81,6 +81,22 @@ def test_option_labels_are_numbered_and_distinct():
     assert m.option_labels(None) == []
 
 
+def test_option_labels_keep_a_whole_clause_without_a_comma():
+    # SP-1305: the alert demo's ledgerly prompt read '1 · Down-migrate 0022…' and
+    # '2 · Apply on top of the…'; the Cockpit row wraps, so the clause fits.
+    p = Prompt("Which migration strategy should I use for 0023?",
+               ["Down-migrate 0022 first", "Apply on top of the current schema",
+                "Skip 0023 for now"])
+    assert m.option_labels(p) == ["1 · Down-migrate 0022 first",
+                                  "2 · Apply on top of the current schema",
+                                  "3 · Skip 0023 for now"]
+    # still cut at a word past COCKPIT_LABEL_MAX
+    long = Prompt("?", ["Rewrite the whole migration history from scratch please", "No"])
+    first = m.option_labels(long)[0]
+    assert first.endswith("…") and len(first) <= len("1 · ") + m.COCKPIT_LABEL_MAX
+    assert first == "1 · Rewrite the whole migration…"
+
+
 def test_prompt_lines_mark_the_cursor():
     assert m.prompt_lines(PROMPT) == [("1. Yes", False),
                                       ("2. Yes, allow all edits this session", True),
