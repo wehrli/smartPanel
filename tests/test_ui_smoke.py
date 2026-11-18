@@ -589,3 +589,61 @@ def test_debug_timing_installs_the_hook_when_wiring(monkeypatch, tmp_path):
             if stop is not None:
                 stop(svc)
         app._services.clear()
+
+
+# ───────────────────────── main-loop budget (SP-2702) ─────────────────────────
+
+def test_debug_timing_watchdog_starts_after_startup(monkeypatch, tmp_path):
+    """Startup is reported as `app.startup`, never as a main-loop stall."""
+    from smartpanel import cli, notify, timing
+    from smartpanel.app import SmartPanelApp
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(notify, "send", lambda *a, **k: True)
+    timing.reset()
+    app = SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
+    try:
+        app._wire(cli.parse_args(["--demo", "calm", "--debug-timing"]))
+        assert timing.installed() and timing._watchdog is None
+        deadline = time.monotonic() + 5
+        while timing._watchdog is None and time.monotonic() < deadline:
+            GLib.MainContext.default().iteration(False)
+        assert timing._watchdog is not None
+        st = timing.stats()["app.startup"]
+        assert st.calls == 1 and st.slow == 0
+        assert timing.LAG_NAME not in timing.stats()
+    finally:
+        timing.uninstall()
+        timing.reset()
+        for svc in app._services:
+            stop = type(svc).__dict__.get("stop")
+            if stop is not None:
+                stop(svc)
+        app._services.clear()
+
+
+def test_first_window_build_is_timed_under_its_own_name(monkeypatch, tmp_path):
+    from smartpanel import timing
+    from smartpanel.app import SmartPanelApp
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    timing.reset()
+    app = SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
+    app.config = FakeConfig()
+    try:
+        win = app.ensure_window()
+        assert app.ensure_window() is win
+        assert timing.stats()["ui.ensure_window"].calls == 1
+        assert not win.get_mapped()
+    finally:
+        if app.window is not None:
+            app.window.shutdown()
+            app.window.destroy()
+            app.window = None
+        timing.reset()
+
+
+def test_prewarm_modules_all_import():
+    import importlib
+    from smartpanel.app import SmartPanelApp
+    for name in SmartPanelApp.PREWARM_MODULES:
+        importlib.import_module(name)
