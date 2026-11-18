@@ -101,6 +101,28 @@ def test_no_transcript_is_skill_failed_with_a_reason(monkeypatch, tmp_path):
     assert order == ["close"]
 
 
+def test_no_transcript_fails_on_the_first_step_not_the_skill_step(monkeypatch, tmp_path):
+    """Nothing was typed, so the checklist must not tick 'Type /journal'."""
+    monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
+    monkeypatch.setattr(journal, "find_transcript", lambda _c: None)
+    _, steps, _ = _run()
+    assert steps == [(0, False, False), (0, False, True)]
+
+
+def test_session_gone_before_typing_fails_where_the_headless_run_stopped(monkeypatch, tmp_path):
+    """Live never got to typing; the headless retry reached the skill and failed there."""
+    _setup(monkeypatch, tmp_path, (journal.LiveResult(journal.LIVE_UNAVAILABLE), [0]),
+           resume=None)
+    _, steps, _ = _run()
+    assert steps[-1] == (2, True, True)
+
+
+def test_never_journaling_fails_on_the_first_step(monkeypatch, tmp_path):
+    monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
+    _, steps, _ = _run(run_skill=False)
+    assert steps[-1] == (0, False, True)
+
+
 def test_receipt_front_matter(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path,
            (journal.LiveResult(journal.LIVE_OK, "Appended § webapp."), [0, 1, 2]))

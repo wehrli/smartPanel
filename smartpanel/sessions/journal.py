@@ -578,11 +578,19 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
     session can never be left un-closable.
 
     `on_progress(step, headless=, failed=)` reports `state.JOURNAL_STEPS`
-    indexes, always increasing. A failed skill is reported once, on the skill
-    step, and the run then closes and writes the receipt without advancing the
-    step: the UI shows "failed, closing anyway" on the step that failed.
+    indexes, always increasing. A failure is reported once, on the furthest
+    step the run actually began (step 0 when there was no transcript to
+    journal, step 1 when the command never reached the session, otherwise the
+    skill step), and the run then closes and writes the receipt without
+    advancing: the UI shows "failed, closing anyway" on the step that failed
+    rather than ticking steps that never happened.
     """
+    reached = STEP_WAIT_IDLE
+
     def progress(step: int, **kw) -> None:
+        nonlocal reached
+        if not kw.get("failed"):
+            reached = max(reached, step)
         if on_progress is None:
             return
         try:
@@ -637,7 +645,7 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
         confirmation = (FAILED_CONFIRMATION if transcript or not run_skill
                         else NO_TRANSCRIPT_CONFIRMATION)
     if failed:
-        progress(STEP_SKILL, headless=headless, failed=True)
+        progress(min(reached, STEP_SKILL), headless=headless, failed=True)
 
     # Condensed after the close so the receipt covers the whole session,
     # including the journal turn itself.
