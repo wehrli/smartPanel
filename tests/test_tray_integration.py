@@ -1,12 +1,11 @@
-"""Tray end to end on a private bus (Gio.TestDBus) with a fake StatusNotifierWatcher.
+"""Tray end to end on a private bus with a fake StatusNotifierWatcher.
 
-Never touches the user's session bus: TestDBus spawns its own dbus-daemon, and the
-environment it changes is restored afterwards.
+Never touches the user's session bus: tests/privbus.py spawns its own dbus-daemon
+(not Gio.TestDBus, whose teardown can stall 30 s), and the environment is restored.
 """
 from __future__ import annotations
 
 import os
-import shutil
 import time
 
 import pytest
@@ -18,10 +17,10 @@ from smartpanel.state.store import Store
 from smartpanel.tray import menu, sni
 from smartpanel.tray.dbusmenu import register_object
 from smartpanel.tray.tray import ITEM_PATH, MENU_SUFFIX, Tray
+from tests import privbus
 from tests.fixtures import tray_states as fx
 
-pytestmark = pytest.mark.skipif(shutil.which("dbus-daemon") is None,
-                                reason="needs dbus-daemon for Gio.TestDBus")
+pytestmark = pytest.mark.skipif(not privbus.AVAILABLE, reason="needs dbus-daemon")
 
 WATCHER_XML = """
 <node><interface name="org.kde.StatusNotifierWatcher">
@@ -83,22 +82,22 @@ class RecordingActions:
 @pytest.fixture
 def bus():
     saved = {k: os.environ.get(k) for k in ("DBUS_SESSION_BUS_ADDRESS", "DISPLAY")}
-    tb = Gio.TestDBus.new(Gio.TestDBusFlags.NONE)
-    tb.up()
-    addr = tb.get_bus_address()
     flags = (Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
              | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION)
-    app = Gio.DBusConnection.new_for_address_sync(addr, flags, None, None)
-    host = Gio.DBusConnection.new_for_address_sync(addr, flags, None, None)
     try:
-        yield app, host
-    finally:
-        for c in (app, host):
+        with privbus.private_bus() as addr:
+            os.environ["DBUS_SESSION_BUS_ADDRESS"] = addr
+            app = Gio.DBusConnection.new_for_address_sync(addr, flags, None, None)
+            host = Gio.DBusConnection.new_for_address_sync(addr, flags, None, None)
             try:
-                c.close_sync(None)
-            except GLib.Error:
-                pass
-        tb.down()
+                yield app, host
+            finally:
+                for c in (app, host):
+                    try:
+                        c.close_sync(None)
+                    except GLib.Error:
+                        pass
+    finally:
         for k, v in saved.items():
             if v is None:
                 os.environ.pop(k, None)

@@ -1,4 +1,4 @@
-"""PanelService + PanelClient over a private bus (Gio.TestDBus).
+"""PanelService + PanelClient over a private bus (tests/privbus.py, not Gio.TestDBus).
 
 The service is exported on one connection that owns dev.omdev.SmartPanel, exactly as
 the Adw.Application does; the client uses a second connection. Client calls block, so
@@ -23,6 +23,7 @@ from smartpanel.dbus.service import (  # noqa: E402
 )
 from smartpanel.state.model import SECTIONS, Event, Session  # noqa: E402
 from smartpanel.state.store import Store  # noqa: E402
+from tests import privbus  # noqa: E402
 
 CTX = GLib.MainContext.default()
 
@@ -102,12 +103,10 @@ class RecordingActions:
 
 @pytest.fixture(scope="module")
 def bus():
-    test_bus = Gio.TestDBus.new(Gio.TestDBusFlags.NONE)
-    test_bus.up()
-    try:
-        yield test_bus.get_bus_address()
-    finally:
-        test_bus.down()
+    if not privbus.AVAILABLE:
+        pytest.skip("needs dbus-daemon")
+    with privbus.private_bus() as address:
+        yield address
 
 
 def _connect(address: str) -> Gio.DBusConnection:
