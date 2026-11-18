@@ -15,14 +15,21 @@ import os
 import pytest
 
 _PREFIX = "SMARTPANEL_"
+# Knobs of the test suite itself, not of the app: kept.
+_TEST_KNOBS = frozenset({"SMARTPANEL_REGEN_FIXTURES"})
 
-for _k in [k for k in os.environ if k.startswith(_PREFIX)]:
+
+def _app_knobs() -> list[str]:
+    return [k for k in os.environ if k.startswith(_PREFIX) and k not in _TEST_KNOBS]
+
+
+for _k in _app_knobs():
     del os.environ[_k]
 
 
 @pytest.fixture(autouse=True)
 def _isolated_env(monkeypatch, tmp_path_factory):
-    for k in [k for k in os.environ if k.startswith(_PREFIX)]:
+    for k in _app_knobs():
         monkeypatch.delenv(k)
     xdg = tmp_path_factory.mktemp("xdg")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg / "config"))
