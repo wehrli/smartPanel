@@ -154,7 +154,7 @@ system:
   updated_at: 1794925920.0
 spend:
   cost_today: 8.1
-  cost_week: 142.1
+  cost_week: 126.36
   cost_lifetime: 2318.55
   tokens_today: 14100000
   tokens_today_human: 14.1M
@@ -188,16 +188,16 @@ spend:
   projects_today:
   - name: smartPanel
     cost_usd: 3.13
-    tokens: 5441275
+    tokens: 5448519
   - name: tacomap
     cost_usd: 2.53
-    tokens: 4406250
+    tokens: 4404074
   - name: JobScout
     cost_usd: 1.73
-    tokens: 3016359
+    tokens: 3011481
   - name: ledgerly
     cost_usd: 0.71
-    tokens: 1236116
+    tokens: 1235926
   models_today:
   - family: Opus
     cost_usd: 6.66
@@ -218,16 +218,16 @@ spend:
     projects:
     - name: smartPanel
       cost_usd: 3.13
-      tokens: 5441275
+      tokens: 5448519
     - name: tacomap
       cost_usd: 2.53
-      tokens: 4406250
+      tokens: 4404074
     - name: JobScout
       cost_usd: 1.73
-      tokens: 3016359
+      tokens: 3011481
     - name: ledgerly
       cost_usd: 0.71
-      tokens: 1236116
+      tokens: 1235926
     models:
     - family: Opus
       cost_usd: 6.66
@@ -575,6 +575,19 @@ spend:
   updated_at: 1794925920.0
 sessions:
   items:
+  - name: claude-ledgerly
+    project: ledgerly
+    title: Migrate goose 0023
+    cwd: ~/dev/omdev/ledgerly
+    attached: false
+    created: 1794914520.0
+    activity: idle
+    phase: none
+    doing: null
+    prompt: null
+    waiting_since: null
+    cost_usd: 0.71
+    journal: null
   - name: claude-smartPanel
     project: smartPanel
     title: Fix swap alert hysteresis
@@ -586,7 +599,7 @@ sessions:
     doing: null
     prompt: null
     waiting_since: null
-    cost_usd: 2.9
+    cost_usd: 0.99
     journal: null
   - name: claude-tacomap
     project: tacomap
@@ -599,7 +612,7 @@ sessions:
     doing: null
     prompt: null
     waiting_since: null
-    cost_usd: 1.85
+    cost_usd: 0.63
     journal: null
   - name: claude-JobScout
     project: JobScout
@@ -612,20 +625,7 @@ sessions:
     doing: null
     prompt: null
     waiting_since: null
-    cost_usd: 1.88
-    journal: null
-  - name: claude-ledgerly
-    project: ledgerly
-    title: Migrate goose 0023
-    cwd: ~/dev/omdev/ledgerly
-    attached: false
-    created: 1794914520.0
-    activity: idle
-    phase: none
-    doing: null
-    prompt: null
-    waiting_since: null
-    cost_usd: 2.09
+    cost_usd: 0.64
     journal: null
   tmux_ok: true
   terminal_ok: true

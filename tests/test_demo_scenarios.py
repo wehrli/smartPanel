@@ -281,3 +281,37 @@ def test_fixtures_match_build_state(name, utc):
 def test_store_for_helper():
     store = store_for("many")
     assert len(store.state.sessions.items) == 9
+
+
+def test_demo_session_order_is_the_real_panels():
+    """--demo screenshots must show the order the real panel produces."""
+    from smartpanel.sessions.order import sort_sessions as real_sort
+
+    for name in SCENARIOS:
+        items = build_state(name, DEMO_NOW).sessions.items
+        assert items == real_sort(items), name
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_week_is_the_seven_days_listed(name):
+    """SP-1007: "This week" equals the seven day totals listed under it."""
+    sp = build_state(name, DEMO_NOW).spend
+    if not sp.days:
+        return
+    assert sp.cost_week == round(sum(d.cost_usd for d in sp.days[:7]), 2)
+    assert sp.cost_today == sp.days[0].cost_usd
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
+def test_no_session_costs_more_than_its_project_spent_today(name):
+    st = build_state(name, DEMO_NOW)
+    if not st.spend.projects_today:
+        return
+    by_project: dict[str, float] = {}
+    for s in st.sessions.items:
+        by_project[s.project] = by_project.get(s.project, 0.0) + (s.cost_usd or 0.0)
+    today = {p.name: p.cost_usd for p in st.spend.projects_today}
+    for project, cost in by_project.items():
+        assert today.get(project, 0.0) >= round(cost, 2), (name, project)
+    assert st.spend.cost_today == round(sum(today.values()), 2)
+    assert round(sum(st.spend.hourly_today), 2) == st.spend.cost_today

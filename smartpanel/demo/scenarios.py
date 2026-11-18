@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 
 from smartpanel import __version__
 from smartpanel.alerts import Thresholds, raw_level
+from smartpanel.sessions.order import sort_sessions  # the real panel's order (SP-1204)
 from smartpanel.state.model import (
     IDLE, OUTCOME_JOURNALED, OUTCOME_TIMEOUT, PHASE_JOURNALING, PHASE_LAUNCHING, RUNNING,
     UNKNOWN, WAITING,
@@ -85,9 +86,6 @@ PAST: tuple[tuple[float, ...], ...] = (
 )
 NET_DOWN_MB = (.2, .4, .3, 1.2, 2.8, 2.1, .6, .4, .9, 2.2, 3.1, 2.4)
 
-# Ordering used by every session list (prototype ORDER).
-_ORDER = {WAITING: 0, RUNNING: 1, PHASE_JOURNALING: 2, PHASE_LAUNCHING: 3, IDLE: 4, UNKNOWN: 5}
-
 # The receipts the journal page starts with (seedJournal), newest first.
 SEED_JOURNAL = (
     dict(hhmm="12:02", title="Map clustering", project="tacomap", ok=True, dur=2 * 3600 + 30 * 60,
@@ -122,17 +120,6 @@ def make_prompt(spec) -> Prompt:
     q, opts, kind = spec
     return Prompt(question=q, options=list(opts), cursor=0, kind=kind,
                   fingerprint=fingerprint(q, opts))
-
-
-def sort_key(s: Session) -> int:
-    if s.phase in (PHASE_JOURNALING, PHASE_LAUNCHING):
-        return _ORDER[s.phase]
-    return _ORDER.get(s.activity, 5)
-
-
-def sort_sessions(items: list[Session]) -> list[Session]:
-    """Display order: waiting, running, journaling, launching, idle (stable)."""
-    return sorted(items, key=sort_key)
 
 
 def unique_name(project: str, taken) -> str:
@@ -272,7 +259,6 @@ class _Knobs:
     up_mb: float = .18
     swap: float | None = 12
     spend: float = BASE_SPEND
-    week: float = 142.10
     life: float = 2318.55
     tokens_m: float = BASE_TOKENS_M
     burn: float = 3.10
@@ -309,17 +295,53 @@ def _split(total: float, tokens: int, parts) -> list[tuple[str, float, int]]:
     return [(n, round(total * share, 2), int(round(tokens * share))) for n, share in parts]
 
 
-def _spend(k: _Knobs, now: float, budget: float | None) -> SpendState:
-    scale = k.spend / BASE_SPEND
-    tokens = int(round(k.tokens_m * 1e6))
-    projects = [ProjectSpend(n, round(c * scale, 2), int(round(tokens * c / BASE_SPEND)))
-                for n, c in PROJECT_SPLIT]
-    models = [ModelSpend(n, c, t) for n, c, t in _split(k.spend, tokens, MODEL_SPLIT)]
+def projects_today(spend: float, sessions=()) -> list[tuple[str, float]]:
+    """Today's cost per project, never below what its open sessions cost.
+
+    Starts from the prototype's PROJECT_SPLIT scaled to `spend`. A project
+    whose sessions cost more than its share (many opens a second ledgerly
+    session and three projects outside the split) is raised to its sessions'
+    sum, and the excess comes out of the other projects' slack (share minus
+    their sessions), so the day's total stays `spend` and no session ever
+    costs more than its project spent that day. Cost descending.
+    """
+    scale = spend / BASE_SPEND
+    used: dict[str, float] = {}
+    for s in sessions:
+        used[s.project] = used.get(s.project, 0.0) + s.cost
+    costs = {n: c * scale for n, c in PROJECT_SPLIT}
+    excess = 0.0
+    for n, c in used.items():
+        if c > costs.get(n, 0.0):
+            excess += c - costs.get(n, 0.0)
+            costs[n] = c
+    slack = {n: costs[n] - used.get(n, 0.0) for n in costs if costs[n] > used.get(n, 0.0)}
+    total_slack = sum(slack.values())
+    take = min(excess, total_slack)
+    for n, room in slack.items():
+        costs[n] -= take * room / total_slack
+    out = {n: round(c, 2) for n, c in costs.items() if round(c, 2) > 0}
+    # Rounding can leave the sum a cent off; settle it on the largest share.
+    drift = round(max(spend, sum(used.values())) - sum(out.values()), 2)
+    if out and drift:
+        top = max(out, key=out.get)
+        out[top] = round(out[top] + drift, 2)
+    return sorted(out.items(), key=lambda nc: -nc[1])
+
+
+def _spend(k: _Knobs, now: float, budget: float | None, sessions=()) -> SpendState:
+    split = projects_today(k.spend, sessions)
+    spent = round(sum(c for _, c in split), 2)     # k.spend, unless sessions raised it
+    scale = spent / BASE_SPEND
+    tokens = int(round(k.tokens_m * 1e6 * spent / k.spend)) if k.spend else 0
+    projects = [ProjectSpend(n, c, int(round(tokens * c / spent)) if spent else 0)
+                for n, c in split]
+    models = [ModelSpend(n, c, t) for n, c, t in _split(spent, tokens, MODEL_SPLIT)]
     today = datetime.fromtimestamp(now)
-    days = [DaySpend(date=today.date().isoformat(), label="Today", cost_usd=round(k.spend, 2),
+    days = [DaySpend(date=today.date().isoformat(), label="Today", cost_usd=spent,
                      tokens=tokens, projects=projects, models=models,
-                     praise_cost_usd=round(k.spend * PRAISE_RATE, 2),
-                     praise_echo_cost_usd=round(k.spend * PRAISE_ECHO_RATE, 2))]
+                     praise_cost_usd=round(spent * PRAISE_RATE, 2),
+                     praise_echo_cost_usd=round(spent * PRAISE_ECHO_RATE, 2))]
     for i, per_project in enumerate(PAST, start=1):
         d = today - timedelta(days=i)
         total = round(sum(per_project), 2)
@@ -335,14 +357,16 @@ def _spend(k: _Knobs, now: float, budget: float | None) -> SpendState:
             praise_cost_usd=round(total * PRAISE_RATE, 2),
             praise_echo_cost_usd=round(total * PRAISE_ECHO_RATE, 2)))
     return SpendState(
-        cost_today=round(k.spend, 2), cost_week=k.week, cost_lifetime=k.life,
+        # SP-1007: "This week" is the seven days listed under it, today included.
+        cost_today=spent, cost_week=round(sum(d.cost_usd for d in days[:7]), 2),
+        cost_lifetime=k.life,
         tokens_today=tokens, tokens_today_human=human_tokens(tokens),
         burn_per_hour=k.burn, cache_hit_pct=float(k.cache),
         hourly_today=hourly_today(scale, now),
         projects_today=projects, models_today=models,
-        praise_cost_today=round(k.spend * PRAISE_RATE, 2),
-        praise_echo_today=round(k.spend * PRAISE_ECHO_RATE, 2),
-        days=days, forecast=compute_forecast(k.spend, k.burn, budget, now),
+        praise_cost_today=round(spent * PRAISE_RATE, 2),
+        praise_echo_today=round(spent * PRAISE_ECHO_RATE, 2),
+        days=days, forecast=compute_forecast(spent, k.burn, budget, now),
         updated_at=now,
     )
 
@@ -405,6 +429,8 @@ def build_state(name: str, now: float | None = None, *, budget: float | None = D
             for s in raw:
                 s.state, s.prompt, s.tool = IDLE, None, None
             k.spend, k.cpu, k.mem, k.burn, k.tokens_m = 8.10, 6, 41, .4, 14.1
+            for s in raw:   # a calm day: the sessions shrink with the spend
+                s.cost = round(s.cost * k.spend / BASE_SPEND, 2)
             k.hist_cpu, k.hist_mem = (6, 6), (41, 2)
         case "alert":
             raw[3].state, raw[3].prompt = WAITING, PROMPT_ASK
@@ -432,7 +458,7 @@ def build_state(name: str, now: float | None = None, *, budget: float | None = D
     elif loading is not None:
         spend = SpendState()            # unknown until the first scan finishes
     else:
-        spend = _spend(k, now, budget)
+        spend = _spend(k, now, budget, raw)
     return PanelState(
         system=_system(name, k, now, th),
         spend=spend,
@@ -448,4 +474,4 @@ def build_state(name: str, now: float | None = None, *, budget: float | None = D
 def loaded_spend(now: float | None = None, budget: float | None = DEMO_BUDGET) -> SpendState:
     """What the cold scenario's spend becomes once its simulated scan completes."""
     now = time.time() if now is None else float(now)
-    return _spend(_Knobs(), now, budget)
+    return _spend(_Knobs(), now, budget, _busy())

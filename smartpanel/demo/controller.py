@@ -26,6 +26,7 @@ from typing import Any, Callable, Mapping
 
 from smartpanel.alerts import Thresholds, next_level, Level
 from smartpanel.demo import scenarios as sc
+from smartpanel.sessions.order import sort_sessions
 from smartpanel.state.model import (
     IDLE, JOURNAL_STEPS, OUTCOME_JOURNALED, OUTCOME_SKILL_FAILED, PHASE_JOURNALING,
     PHASE_LAUNCHING, PHASE_NONE, RUNNING, UNKNOWN, WAITING,
@@ -221,7 +222,7 @@ class DemoController:
         def mutate(sec) -> None:
             if fn:
                 fn(sec.items)
-            sec.items[:] = sc.sort_sessions(sec.items)
+            sec.items[:] = sort_sessions(sec.items)
             sec.updated_at = self.clock()
         self.store.mutate("sessions", mutate)
 

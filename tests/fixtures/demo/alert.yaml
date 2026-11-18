@@ -154,7 +154,7 @@ system:
   updated_at: 1794925920.0
 spend:
   cost_today: 41.2
-  cost_week: 142.1
+  cost_week: 159.46
   cost_lifetime: 2318.55
   tokens_today: 72400000
   tokens_today_human: 72.4M
@@ -188,16 +188,16 @@ spend:
   projects_today:
   - name: smartPanel
     cost_usd: 15.9
-    tokens: 27939597
+    tokens: 27940777
   - name: tacomap
     cost_usd: 12.88
-    tokens: 22625000
+    tokens: 22633786
   - name: JobScout
     cost_usd: 8.81
-    tokens: 15488255
+    tokens: 15481650
   - name: ledgerly
     cost_usd: 3.61
-    tokens: 6347148
+    tokens: 6343786
   models_today:
   - family: Opus
     cost_usd: 33.87
@@ -218,16 +218,16 @@ spend:
     projects:
     - name: smartPanel
       cost_usd: 15.9
-      tokens: 27939597
+      tokens: 27940777
     - name: tacomap
       cost_usd: 12.88
-      tokens: 22625000
+      tokens: 22633786
     - name: JobScout
       cost_usd: 8.81
-      tokens: 15488255
+      tokens: 15481650
     - name: ledgerly
       cost_usd: 3.61
-      tokens: 6347148
+      tokens: 6343786
     models:
     - family: Opus
       cost_usd: 33.87
@@ -575,27 +575,6 @@ spend:
   updated_at: 1794925920.0
 sessions:
   items:
-  - name: claude-smartPanel
-    project: smartPanel
-    title: Fix swap alert hysteresis
-    cwd: ~/dev/omdev/smartPanel
-    attached: true
-    created: 1794922200.0
-    activity: waiting
-    phase: none
-    doing: null
-    prompt:
-      question: Do you want to make this edit to alerts.py?
-      options:
-      - 'Yes'
-      - Yes, allow all edits this session
-      - No, tell Claude what to do differently
-      cursor: 0
-      kind: permission
-      fingerprint: a76ca9faa445c506
-    waiting_since: 1794925680.0
-    cost_usd: 2.9
-    journal: null
   - name: claude-ledgerly
     project: ledgerly
     title: Migrate goose 0023
@@ -616,6 +595,27 @@ sessions:
       fingerprint: e2c780dbc40612ea
     waiting_since: 1794925680.0
     cost_usd: 2.09
+    journal: null
+  - name: claude-smartPanel
+    project: smartPanel
+    title: Fix swap alert hysteresis
+    cwd: ~/dev/omdev/smartPanel
+    attached: true
+    created: 1794922200.0
+    activity: waiting
+    phase: none
+    doing: null
+    prompt:
+      question: Do you want to make this edit to alerts.py?
+      options:
+      - 'Yes'
+      - Yes, allow all edits this session
+      - No, tell Claude what to do differently
+      cursor: 0
+      kind: permission
+      fingerprint: a76ca9faa445c506
+    waiting_since: 1794925680.0
+    cost_usd: 2.9
     journal: null
   - name: claude-tacomap
     project: tacomap
