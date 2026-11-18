@@ -128,6 +128,16 @@ def build_gallery() -> Gtk.Widget:
         empties.append(e)
     col.append(empties)
 
+    from smartpanel.demo import build_state
+    from smartpanel.ui.widgets import spend_journal_model as sjm
+    from smartpanel.ui.widgets.spend_journal_receipt import Receipt
+    col.append(_section("Receipt"))
+    st = build_state("busy")
+    w["receipt"] = Receipt()
+    w["receipt"].set_model(sjm.receipt_model(st.spend.days[0], budget=st.spend.forecast.budget_usd,
+                                             printed_at=st.spend.updated_at))
+    col.append(w["receipt"])
+
     scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
     scroller.set_child(col)
     scroller.widgets = w

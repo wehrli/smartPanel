@@ -11,7 +11,12 @@ Contract:
 """
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from datetime import date
+
+    from smartpanel.state.model import DaySpend
 
 
 class Actions(Protocol):
@@ -44,6 +49,10 @@ class Actions(Protocol):
     def set_setting(self, key: str, value: Any) -> None: ...
     def list_start_folders(self) -> list[dict]:
         """[{name, path, has_session}] for the folder picker (fast, local)."""
+    def spend_days(self, count: int, end: "date | None" = None) -> "list[DaySpend]":
+        """`count` local days ending at `end`, newest first, beyond the 14 in the
+        state (Spend page "Show older days"). Synchronous and fast: reads the last
+        scan's per-day buckets, never rescans. [] before the first scan."""
     def recheck_environment(self) -> None:
         """Re-test tmux / terminal availability ("Check again")."""
     def quit(self) -> None: ...

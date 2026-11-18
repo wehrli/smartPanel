@@ -388,13 +388,13 @@ class Controller:
                 if log_name else "Journal entry written"
             self._notify("journal", f"Journal written · {title}", f"{where}. Session closed.",
                          action)
-            self.store.toast(f"Journaled & closed “{title}”", action=action)
+            self.store.toast(f"Journaled & closed “{title}”", action=action, notified=True)
         else:
             self._notify("journal_failed", f"Journal failed · {title}",
                          "The session was closed anyway. A receipt with its activity was saved.",
                          action)
             self.store.toast("Closed. The journal failed, receipt saved.", error=True,
-                             action=action)
+                             action=action, notified=True)
         if close_all:
             cur = self.store.state.sessions.close_all
             if cur is not None:
@@ -478,6 +478,9 @@ class Controller:
             self.store.toast(f"Couldn’t start a session in {home_path(str(directory))}: "
                              f"{result.message}", error=True)
         return None
+
+    def spend_days(self, count: int, end=None) -> list:
+        return self.spend.days(count, end) if self.spend is not None else []
 
     def list_start_folders(self) -> list[dict]:
         base = Path(str(self.config.get("sessions.dir") or "~")).expanduser()

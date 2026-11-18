@@ -329,6 +329,38 @@ def projects_today(spend: float, sessions=()) -> list[tuple[str, float]]:
     return sorted(out.items(), key=lambda nc: -nc[1])
 
 
+def _past_day(d: datetime, per_project, today: datetime) -> DaySpend:
+    total = round(sum(per_project), 2)
+    d_tokens = int(round(total / BASE_SPEND * BASE_TOKENS_M * 1e6))
+    projs = sorted((ProjectSpend(n, c, int(round(d_tokens * c / total)))
+                    for (n, _), c in zip(PROJECT_SPLIT, per_project) if c > 0),
+                   key=lambda p: -p.cost_usd)
+    return DaySpend(
+        date=d.date().isoformat(), label=day_label(d, today), cost_usd=total,
+        tokens=d_tokens, projects=projs,
+        models=[ModelSpend(n, c, t) for n, c, t in _split(total, d_tokens, MODEL_SPLIT)]
+        if total else [],
+        praise_cost_usd=round(total * PRAISE_RATE, 2),
+        praise_echo_cost_usd=round(total * PRAISE_ECHO_RATE, 2))
+
+
+def older_days(count: int, end, now: float) -> list[DaySpend]:
+    """`count` days ending at `end` (a date), newest first, for "Show older days".
+
+    Day i before today reuses PAST[(i - 1) % len(PAST)], so the first 14 match the
+    state's list exactly and older ones repeat the same fortnight."""
+    today = datetime.fromtimestamp(now)
+    end_dt = datetime.combine(end, today.time()) if end is not None else today
+    out = []
+    for k in range(count):
+        d = end_dt - timedelta(days=k)
+        i = (today.date() - d.date()).days
+        if i <= 0:
+            continue
+        out.append(_past_day(d, PAST[(i - 1) % len(PAST)], today))
+    return out
+
+
 def _spend(k: _Knobs, now: float, budget: float | None, sessions=()) -> SpendState:
     split = projects_today(k.spend, sessions)
     spent = round(sum(c for _, c in split), 2)     # k.spend, unless sessions raised it
@@ -342,20 +374,8 @@ def _spend(k: _Knobs, now: float, budget: float | None, sessions=()) -> SpendSta
                      tokens=tokens, projects=projects, models=models,
                      praise_cost_usd=round(spent * PRAISE_RATE, 2),
                      praise_echo_cost_usd=round(spent * PRAISE_ECHO_RATE, 2))]
-    for i, per_project in enumerate(PAST, start=1):
-        d = today - timedelta(days=i)
-        total = round(sum(per_project), 2)
-        d_tokens = int(round(total / BASE_SPEND * BASE_TOKENS_M * 1e6))
-        projs = sorted((ProjectSpend(n, c, int(round(d_tokens * c / total)))
-                        for (n, _), c in zip(PROJECT_SPLIT, per_project) if c > 0),
-                       key=lambda p: -p.cost_usd)
-        days.append(DaySpend(
-            date=d.date().isoformat(), label=day_label(d, today), cost_usd=total,
-            tokens=d_tokens, projects=projs,
-            models=[ModelSpend(n, c, t) for n, c, t in _split(total, d_tokens, MODEL_SPLIT)]
-            if total else [],
-            praise_cost_usd=round(total * PRAISE_RATE, 2),
-            praise_echo_cost_usd=round(total * PRAISE_ECHO_RATE, 2)))
+    days += [_past_day(today - timedelta(days=i), per_project, today)
+             for i, per_project in enumerate(PAST, start=1)]
     return SpendState(
         # SP-1007: "This week" is the seven days listed under it, today included.
         cost_today=spent, cost_week=round(sum(d.cost_usd for d in days[:7]), 2),

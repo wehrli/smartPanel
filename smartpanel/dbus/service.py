@@ -75,10 +75,6 @@ consumer's cadence). The intended recipe:
    been switched on or moved); anything else is throttled.
 3. Fetch at most once per 5 s: one trailing ``GetState(['hud'])`` per window.
 
-At the time of writing the extension still implements step 3 with
-``GetState(['spend','sessions','system','settings','app'])`` and does not filter
-``journal``-only changes; it reads the same fields either way.
-
 History trimming (SP-0006): the Store keeps up to 300 points per series, but over D-Bus
 every ``history*`` list under ``system`` is cut to its newest ``HISTORY_POINTS`` (60).
 

@@ -262,17 +262,26 @@ class DemoController:
         self.store.emit(Event("quit", {}))
 
     # ───────────────────────── sessions ─────────────────────────
-    def focus_session(self, name: str) -> None:
+    def focus_session(self, name: str, on_result: Callable[[str], None] | None = None) -> None:
+        """`on_result` gets "raised" | "reattached" | "failed" on a later tick, as the
+        real ladder reports it (D-Bus FocusSession replies with it)."""
+        def report(result: str) -> None:
+            if on_result is not None:
+                self._after(0, lambda: on_result(result))
         s = self._known(name)
         if s is None or self._busy(s):
+            report("failed")
             return
         self._sessions_changed(lambda _i: setattr(s, "attached", True))
         title = s.display_title
         if self.focus_route == "raise":
             self.store.toast(f"Raised the terminal for “{title}”")
+            report("raised")
         elif self._cfg("sessions.reattach", True):
             self.store.toast(f"Re-attached “{title}” in a new terminal. The old window closed.")
+            report("reattached")
         else:
+            report("failed")
             self.store.toast("Couldn’t raise the terminal. Turn on re-attach in Settings.",
                              error=True, action={"label": "Settings", "page": "settings"})
 
@@ -567,6 +576,12 @@ class DemoController:
             return
         fc = sc.compute_forecast(sp.cost_today, sp.burn_per_hour, self._budget, self.clock())
         self.store.update("spend", forecast=fc)
+
+    def spend_days(self, count: int, end=None) -> list:
+        """Older days for the Spend page: the scenario's past pattern, repeated."""
+        if self.store.state.app.loading is not None or not self.store.state.spend.days:
+            return []
+        return sc.older_days(count, end, self.clock())
 
     def list_start_folders(self) -> list[dict]:
         base = self._start_dir().rstrip("/")

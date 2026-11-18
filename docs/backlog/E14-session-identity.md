@@ -22,6 +22,12 @@ The roadmap item from CLAUDE.md: `SessionStart` / `SessionEnd` hooks write
 `~/.claude/smartpanel/sessions.json` (tmux name ↔ session id ↔ transcript). This removes the
 ambiguity in SP-1401 and enables journal-on-natural-exit.
 
+> **Deferred (2026-11-18).** Not built in v2: it needs a hook script and a change to the
+> user's Claude Code settings. The risky part, journaling the wrong transcript when two
+> sessions share a folder, is handled without it: the controller flags a shared cwd as
+> `ambiguous`, finds the session's own transcript by the typed `/journal` line, and
+> never falls back to a headless `--resume`.
+
 ### SP-1403 · FE · Show per-session cost
 Size S · Depends on SP-1401
 `$2.90` in row sub-lines and Cockpit meta; hidden (not `$0.00`) when unknown.

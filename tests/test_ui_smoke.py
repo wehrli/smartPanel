@@ -63,7 +63,8 @@ def test_gallery_builds_every_widget():
     g = build_gallery()
     kinds = {type(w).__name__ for w in g.widgets.values()}
     assert {"Banner", "MetricCard", "Sparkline", "HourBars", "Pill", "ActivityGlyph",
-            "LevelChip", "NavBadge", "EmptyState", "Track"} <= kinds
+            "LevelChip", "NavBadge", "EmptyState", "Track", "Receipt"} <= kinds
+    assert g.widgets["receipt"].model is not None
 
 
 def test_metric_card_updates_in_place():

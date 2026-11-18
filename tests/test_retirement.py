@@ -80,6 +80,11 @@ def test_praise_report_needs_no_display_and_no_gtk(tmp_path):
     env = {k: v for k, v in os.environ.items()
            if k not in ("DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS")}
     env["HOME"] = str(tmp_path)          # no ~/.claude: the report must still print
+    runtime = tmp_path / "runtime"       # no compositor socket to reach by accident
+    runtime.mkdir(mode=0o700)
+    env["XDG_RUNTIME_DIR"] = str(runtime)
+    for k in ("GDK_BACKEND", "BROADWAY_DISPLAY"):
+        env.pop(k, None)
     env["PYTHONPATH"] = str(ROOT)
     out = subprocess.run([sys.executable, "-c", probe], cwd=tmp_path, env=env,
                          capture_output=True, text=True, timeout=120)

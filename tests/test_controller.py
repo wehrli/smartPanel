@@ -200,6 +200,7 @@ def test_close_with_journal_runs_the_skill_then_reports(h):
     assert [s.name for s in h.store.state.sessions.items] == ["claude-api"]
     toast = h.toasts()[-1]
     assert toast["text"] == "Journaled & closed “Fix login”"
+    assert toast["notified"] is True      # a bubble already went out: no second one
     assert toast["action"]["label"] == "View"
     assert toast["action"]["page"].startswith("journal:20261117-1200")
     assert h.notes[-1][0] == "journal" and h.notes[-1][1] == "Journal written · Fix login"
@@ -215,6 +216,7 @@ def test_failed_journal_toast_and_notification(tmp_path):
     hh.ctl.close_session("claude-webapp", journal=True)
     t = hh.toasts()[-1]
     assert t["error"] and t["text"] == "Closed. The journal failed, receipt saved."
+    assert t["notified"] is True
     assert hh.notes[-1][1] == "Journal failed · webapp"
     assert hh.tmux.killed == ["claude-webapp"]
 
@@ -522,3 +524,13 @@ def test_close_all_reads_tmux_once_not_once_per_session(tmp_path):
     rows = {s.name: s for s in hh.store.state.sessions.items}
     assert "claude-young" not in rows  # killed and gone in the same callback
     assert all(rows[f"claude-p{i}"].phase == PHASE_JOURNALING for i in range(9))
+
+
+def test_spend_days_reads_the_spend_service(h):
+    class FakeSpend:
+        def days(self, count, end=None):
+            return [("day", count, end)]
+    h.ctl.spend = FakeSpend()
+    assert h.ctl.spend_days(14, "2026-11-01") == [("day", 14, "2026-11-01")]
+    h.ctl.spend = None
+    assert h.ctl.spend_days(14) == []

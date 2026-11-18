@@ -12,6 +12,13 @@ Size S · Depends on SP-0801
 A profiling run (`--debug-timing`) that logs any main-loop callback over 50 ms. Checked
 with 9 sessions and a cold scan of 1,000+ transcripts.
 
+> **Measured 2026-11-18:** `--debug-timing`, private bus, cold scan of 1,100
+> transcripts (411 MB). Before (scan on a thread): `SystemCollector._on_timer` worst
+> 5563 ms, `SessionsService._tick` worst 1231 ms, 11 watchdog breaches. After (scan in a
+> child process, `claude_stats/scan_worker.py`; tmux reads on a worker thread):
+> `_on_timer` worst 3.6 ms, `_tick` worst 16.3 ms, no breach after startup. The 9 live
+> tmux sessions part was not run: the checks never touch real tmux.
+
 ### SP-2703 · DOCS · README and CLAUDE.md
 Size S
 New screenshots, the settings list, the palette shortcut, the new apt packages

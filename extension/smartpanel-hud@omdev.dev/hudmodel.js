@@ -11,7 +11,10 @@
 // Design source: docs/design/prototype.html, function hudHTML() and the `.hud` CSS (B6).
 
 // Sections the HUD asks GetState for.
+// The state sections the HUD shows: a Changed touching none of them (a journal-only
+// change) is ignored. The fetch itself asks for the service's reduced view (SP-2301).
 export const HUD_SECTIONS = ['spend', 'sessions', 'system', 'settings', 'app'];
+export const HUD_REQUEST = ['hud'];
 
 export const CORNERS = ['top-right', 'top-left', 'bottom-right', 'bottom-left'];
 export const DEFAULT_CORNER = 'top-right';

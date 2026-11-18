@@ -27,6 +27,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {
+    HUD_REQUEST,
     HUD_SECTIONS,
     HUD_WIDTH,
     alignFor,
@@ -302,6 +303,8 @@ export default class SmartPanelHudExtension extends Extension {
     _onChanged(sections) {
         if (!this._online || !this._throttle)
             return;
+        if (Array.isArray(sections) && !sections.some(s => HUD_SECTIONS.includes(s)))
+            return;     // e.g. a journal-only change: nothing the HUD draws moved
         const urgent = Array.isArray(sections) && sections.includes('settings');
         // Hidden HUD: only a settings change can make it matter again. While the
         // settings are still unknown (first GetState failed or not back yet), every
@@ -313,12 +316,15 @@ export default class SmartPanelHudExtension extends Extension {
 
     _fetch(done) {
         Gio.DBus.session.call(BUS_NAME, OBJECT_PATH, INTERFACE, 'GetState',
-            new GLib.Variant('(as)', [HUD_SECTIONS]), new GLib.VariantType('(s)'),
+            new GLib.Variant('(as)', [HUD_REQUEST]), new GLib.VariantType('(s)'),
             Gio.DBusCallFlags.NONE, CALL_TIMEOUT_MS, this._cancellable,
             (conn, res) => {
                 try {
                     const [json] = conn.call_finish(res).deepUnpack();
-                    this._apply(JSON.parse(json));
+                    const parsed = JSON.parse(json);
+                    // {"hud": {...}} is the reduced view, the same tree shape as the
+                    // full sections; an older service may answer with the sections.
+                    this._apply(parsed.hud ?? parsed);
                 } catch (e) {
                     if (!(e instanceof GLib.Error &&
                           e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))) {

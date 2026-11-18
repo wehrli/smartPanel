@@ -123,8 +123,13 @@ class Store:
                 log.exception("event listener failed")
 
     def toast(self, text: str, *, error: bool = False,
-              action: dict | None = None) -> None:
-        self.emit(Event("toast", {"text": text, "error": error, "action": action}))
+              action: dict | None = None, notified: bool = False) -> None:
+        """`notified=True`: a desktop notification already went out for this, so the
+        UI must not fall back to a second bubble when the window is hidden."""
+        data = {"text": text, "error": error, "action": action}
+        if notified:
+            data["notified"] = True
+        self.emit(Event("toast", data))
 
     # ── serialization ──
     def to_dict(self, sections: set[str] | None = None) -> dict:

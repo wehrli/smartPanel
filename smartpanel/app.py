@@ -287,6 +287,12 @@ class SmartPanelApp(Adw.Application):
                     self.store.touch(section)
         else:
             self.store.update("app", version=__version__)
+            # Project colours stay put across restarts (SP-0807). Real mode only: a
+            # demo or snapshot must not write the user's state dir.
+            from smartpanel.ui import shellmodel
+            from smartpanel.ui.widgets import overview_system_model as osm
+            osm.use_project_colors(osm.ProjectColors(shellmodel.state_dir()
+                                                     / "project-colors.json"))
         # After the demo state swap (so the settings section it fills survives)
         # and before anything starts reading the store.
         if hasattr(self.config, "bind_store"):

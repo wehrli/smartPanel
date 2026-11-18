@@ -137,6 +137,11 @@ const replyWith = name => {
     eq(fake().calls.length, 1, 'one GetState in flight');
     fake().calls[0].reply(fixtureJson(name));
 };
+// The service's reduced view: {"hud": <same tree shape>}.
+const replyWithHud = name => {
+    eq(fake().calls.length, 1, 'one GetState in flight');
+    fake().calls[0].reply(JSON.stringify({hud: JSON.parse(fixtureJson(name))}));
+};
 
 // ── static checks ──
 
@@ -187,13 +192,13 @@ test('enable: invisible actor on top of the wallpaper, watching the bus name', a
     ext.disable();
 });
 
-test('name appears: GetState for the HUD sections, then the busy HUD is drawn top-right', async () => {
+test('name appears: GetState for the reduced HUD view, then the busy HUD is drawn top-right', async () => {
     await load();
     const ext = newExtension();
     appear();
     const call = fake().calls[0];
     eq(call.method, 'GetState');
-    eq(call.params.deepUnpack(), [['spend', 'sessions', 'system', 'settings', 'app']]);
+    eq(call.params.deepUnpack(), [['hud']]);
     eq(call.replyType.dup_string(), '(s)');
     replyWith('busy');
     const a = hud();
@@ -251,6 +256,24 @@ test('Changed is throttled to one GetState per 5 s; settings changes go out at o
     changed(['settings']);
     eq(fake().calls.length, 1, 'settings bypasses the throttle');
     replyWith('busy');
+    ext.disable();
+});
+
+test('a journal-only Changed never fetches; a {hud: ...} reply draws like the full one', async () => {
+    await load();
+    const ext = newExtension();
+    appear();
+    replyWith('busy');
+    const before = texts(hud());
+    fakeMod.advance(6000);
+    changed(['journal']);
+    fakeMod.advance(6000);
+    eq(fake().calls.length, 0, 'journal-only change ignored');
+    changed(['journal', 'sessions']);
+    fakeMod.advance(6000);
+    eq(fake().calls.length, 1, 'a change that touches the HUD still fetches');
+    replyWithHud('busy');
+    eq(texts(hud()), before, 'reduced view renders the same HUD');
     ext.disable();
 });
 

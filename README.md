@@ -269,7 +269,8 @@ transcript, so the pane is the only place it exists):
 
 **Clicking a session** brings its terminal forward. GNOME Wayland doesn't let one app
 raise another's window, so smartPanel tries, in order: `SMARTPANEL_FOCUS_CMD` (your
-command, `{session}` / `{title}` placeholders); the
+command, `{session}` / `{title}` placeholders, substituted already shell-quoted, so write
+`wmctrl -a {title}`, not `"{title}"`); the
 [Window Calls](https://extensions.gnome.org/extension/4724/window-calls/) extension, the
 one route that raises in place on Wayland; `wmctrl` / `xdotool` on X11; and finally a
 **re-attach**: a fresh terminal running `tmux attach -d`, which closes the old window, so

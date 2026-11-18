@@ -526,3 +526,45 @@ def test_open_path_only_toasts():
     store.on_event(lambda e: toasts.append(e) if e.kind == "toast" else None)
     ctl.open_path("~/dev/omdev/JOURNAL/2026-11.md")
     assert [t.data["text"] for t in toasts] == ["Opened 2026-11.md in the default editor"]
+
+
+# ── older days and focus results (wave 3 follow-ups) ──
+
+def test_spend_days_continue_the_list_without_gap_or_overlap():
+    from datetime import date, timedelta
+    store, ctl, *_ = demo_controller()
+    shown = store.state.spend.days
+    oldest = date.fromisoformat(shown[-1].date)
+    older = ctl.spend_days(14, oldest - timedelta(days=1))
+    assert len(older) == 14
+    assert older[0].date == (oldest - timedelta(days=1)).isoformat()
+    assert [d.date for d in older] == sorted((d.date for d in older), reverse=True)
+    assert any(d.cost_usd > 0 for d in older)
+    # Asking from today again reproduces the state's own past days exactly.
+    again = ctl.spend_days(len(shown) - 1, date.fromisoformat(shown[1].date))
+    assert [(d.date, d.cost_usd) for d in again] == [(d.date, d.cost_usd) for d in shown[1:]]
+
+
+def test_store_toast_marks_notified_only_when_asked():
+    store, ctl, *_ = demo_controller()
+    rec = Recorder(store)
+    store.toast("plain")
+    store.toast("bubbled", notified=True)
+    plain, bubbled = [e.data for e in rec.events if e.kind == "toast"][-2:]
+    assert "notified" not in plain and bubbled["notified"] is True
+
+
+@pytest.mark.parametrize("route,reattach,expected", [
+    ("raise", True, "raised"), ("reattach", True, "reattached"), ("reattach", False, "failed")])
+def test_focus_session_reports_a_result(route, reattach, expected):
+    cfg = Config()
+    cfg.set("sessions.reattach", reattach)
+    store, ctl, sched, _ = demo_controller(config=cfg)
+    ctl.focus_route = route
+    got = []
+    ctl.focus_session(LEDGERLY, on_result=got.append)
+    sched.run_all()
+    assert got == [expected]
+    ctl.focus_session("claude-nope", on_result=got.append)
+    sched.run_all()
+    assert got[-1] == "failed"
