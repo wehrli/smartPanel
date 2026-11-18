@@ -201,6 +201,24 @@ def _folder_child(f: dict) -> Gtk.FlowBoxChild:
     return child
 
 
+RUNNING_LEGEND = "a session is already running there"
+
+
+def _running_legend() -> Gtk.Box:
+    """Explains the ● after a folder name: its tooltip alone is out of reach
+    for keyboard and touch users (SP-1503)."""
+    legend = Gtk.Box(spacing=6)
+    legend.add_css_class("sps-legend")
+    dot = Gtk.Label(label="●", accessible_role=Gtk.AccessibleRole.PRESENTATION)
+    dot.add_css_class("sps-has-session")
+    legend.append(dot)
+    text = Gtk.Label(label=RUNNING_LEGEND[:1].upper() + RUNNING_LEGEND[1:], xalign=0,
+                     wrap=True)
+    text.add_css_class("sps-hint")
+    legend.append(text)
+    return legend
+
+
 def new_session(window, store, actions, config):
     """Folder picker over `actions.list_start_folders()`."""
     if not store.state.sessions.tmux_ok:
@@ -240,6 +258,8 @@ def new_session(window, store, actions, config):
     scroller.set_child(flow)
     if folders:
         box.append(scroller)
+        if any(f.get("has_session") for f in folders):
+            box.append(_running_legend())
     else:
         empty = Gtk.Label(label=f"No folders found in {crumbs(base)[:-2]}. Use Browse… to "
                                 "pick one.", wrap=True, xalign=0)
