@@ -15,12 +15,16 @@
     <!-- One-shot Event (state.model.Event) as kind + JSON data. -->
     <signal name="Event"><arg type="s" name="kind"/><arg type="s" name="data"/></signal>
 
-    <!-- Actions (state.actions.Actions). All return immediately. -->
+    <!-- Actions (state.actions.Actions). All return immediately, except FocusSession,
+         which replies once the focus ladder has run: raised | reattached | failed. -->
     <method name="OpenDashboard"><arg type="s" name="page" direction="in"/></method>
     <method name="OpenPalette"/>
     <method name="SetHud"><arg type="b" name="enabled" direction="in"/></method>
     <method name="PinTicker"><arg type="b" name="pinned" direction="in"/></method>
-    <method name="FocusSession"><arg type="s" name="name" direction="in"/></method>
+    <method name="FocusSession">
+      <arg type="s" name="name" direction="in"/>
+      <arg type="s" name="result" direction="out"/>  <!-- raised | reattached | failed -->
+    </method>
     <method name="RetitleSession"><arg type="s" name="name" direction="in"/></method>
     <method name="RequestClose"><arg type="s" name="name" direction="in"/></method>
     <method name="CloseSession"><arg type="s" name="name" direction="in"/><arg type="b" name="journal" direction="in"/></method>
@@ -34,6 +38,7 @@
       <arg type="s" name="fingerprint" direction="in"/>
     </method>
     <method name="OpenPath"><arg type="s" name="path" direction="in"/></method>
+    <!-- Unknown key / bad value: InvalidArgs. Key owned by an env var: Error.Overridden. -->
     <method name="SetSetting"><arg type="s" name="key" direction="in"/><arg type="s" name="json_value" direction="in"/></method>
   </interface>
 </node>

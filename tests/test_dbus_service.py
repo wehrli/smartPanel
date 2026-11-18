@@ -74,10 +74,16 @@ class RecordingActions:
     def set_hud(self, enabled): self._rec("set_hud", enabled)
     def pin_ticker(self, pinned): self._rec("pin_ticker", pinned)
 
-    def focus_session(self, name):
+    focus_result = "raised"
+
+    def focus_session(self, name, on_result=None):
         self._rec("focus_session", name)
-        # Like the real controller: the ladder result comes back as an Event.
+        # Like the real controller: the ladder result comes back as an Event, and
+        # (later, from the main loop) through on_result.
         self.store.toast(f"Raised the terminal for “{name}”")
+        if on_result is not None:
+            result = self.focus_result
+            GLib.idle_add(lambda: on_result(result) and False)
 
     def retitle_session(self, name): self._rec("retitle_session", name)
 
@@ -148,7 +154,6 @@ ACTION_CASES = [
     (("SetHud", True), ("set_hud", True)),
     (("SetHud", False), ("set_hud", False)),
     (("PinTicker", True), ("pin_ticker", True)),
-    (("FocusSession", "claude-ledgerly"), ("focus_session", "claude-ledgerly")),
     (("RetitleSession", "claude-ledgerly"), ("retitle_session", "claude-ledgerly")),
     (("OpenPath", "/home/u/JOURNAL/2026-11.md"), ("open_path", "/home/u/JOURNAL/2026-11.md")),
     (("RequestClose", "claude-a"), ("request_close", "claude-a")),
@@ -173,7 +178,7 @@ def test_every_method_reaches_actions(env, call, expected):
 def test_xml_and_dispatch_table_cover_the_same_methods():
     info = svc_mod.interface_info()
     xml_methods = {m.name for m in info.methods}
-    assert xml_methods == set(svc_mod._ACTIONS) | {"GetState"}
+    assert xml_methods == set(svc_mod._ACTIONS) | {"GetState", "FocusSession"}
     from smartpanel.dbus.client import SIGNATURES
     assert set(SIGNATURES) == xml_methods
     for m in info.methods:
@@ -188,11 +193,14 @@ def test_answer_prompt_option_is_int(env):
     assert type(option) is int and option == 0
 
 
-@pytest.mark.parametrize("value", [True, 7, 2.5, None, "~/dev", [1, 2], {"a": 1}])
-def test_set_setting_decodes_json(env, value):
+@pytest.mark.parametrize("key, value", [
+    ("hud.enabled", True), ("bar.ticker_seconds", 7), ("swap.warn", 62.5),
+    ("budget.daily_usd", None), ("sessions.dir", "~/dev"), ("hud.corner", "top-left"),
+])
+def test_set_setting_decodes_json(env, key, value):
     _s, actions, _svc, client = env
-    in_thread(lambda: client.call("SetSetting", "x.key", value))
-    assert actions.calls == [("set_setting", "x.key", value)]
+    in_thread(lambda: client.call("SetSetting", key, value))
+    assert actions.calls == [("set_setting", key, value)]
 
 
 def test_set_setting_raw_json_and_bad_json(env):
@@ -204,6 +212,49 @@ def test_set_setting_raw_json_and_bad_json(env):
     assert err.value.name == "org.freedesktop.DBus.Error.InvalidArgs"
     assert "budget.daily_usd" in err.value.message
     assert len(actions.calls) == 1
+
+
+@pytest.mark.parametrize("key, value, needle", [
+    ("no.such.key", 1, "unknown setting"),
+    ("swap.warn", "lots", "swap.warn"),
+    ("hud.corner", "middle", "hud.corner"),
+    ("bar.ticker_seconds", 2.5, "whole number"),
+])
+def test_set_setting_rejects_bad_key_or_value(env, key, value, needle):
+    """The remote caller gets the error; the controller (and its toast) never runs."""
+    store, actions, _svc, client = env
+    toasts = []
+    store.on_event(lambda e: toasts.append(e))
+    with pytest.raises(PanelError) as err:
+        in_thread(lambda: client.call("SetSetting", key, value))
+    assert err.value.name == "org.freedesktop.DBus.Error.InvalidArgs"
+    assert needle in err.value.message
+    assert actions.calls == [] and toasts == []
+
+
+def test_set_setting_refuses_env_owned_key(env):
+    store, actions, _svc, client = env
+    store.update("settings", overridden_by={"swap.warn": "SMARTPANEL_SWAP_WARN"})
+    with pytest.raises(PanelError) as err:
+        in_thread(lambda: client.call("SetSetting", "swap.warn", 70))
+    assert err.value.name == f"{INTERFACE}.Error.Overridden"
+    assert "SMARTPANEL_SWAP_WARN" in err.value.message
+    assert actions.calls == []
+    in_thread(lambda: client.call("SetSetting", "swap.crit", 90))   # others still fine
+    assert actions.calls == [("set_setting", "swap.crit", 90)]
+
+
+def test_set_setting_against_a_real_config(env, tmp_path, monkeypatch):
+    """End to end with Config: env ownership mirrored into the store is honoured."""
+    from smartpanel.config import Config
+    monkeypatch.setenv("SMARTPANEL_SWAP_WARN", "65")
+    store, actions, _svc, client = env
+    cfg = Config.load(tmp_path / "config.yaml")
+    cfg.bind_store(store)
+    with pytest.raises(PanelError) as err:
+        in_thread(lambda: client.call("SetSetting", "swap.warn", 70))
+    assert err.value.name == f"{INTERFACE}.Error.Overridden"
+    assert actions.calls == []
 
 
 def test_action_failure_is_a_readable_error_and_service_survives(env):
@@ -219,8 +270,45 @@ def test_action_failure_is_a_readable_error_and_service_survives(env):
     assert actions.calls[-1] == ("close_all",)
 
 
+@pytest.mark.parametrize("result", ["raised", "reattached", "failed"])
+def test_focus_session_returns_the_ladder_result(env, result):
+    """SP-1701: FocusSession's reply is the ladder's outcome, sent once it arrives."""
+    _s, actions, _svc, client = env
+    actions.focus_result = result
+    assert in_thread(lambda: client.call("FocusSession", "claude-a")) == result
+    assert actions.calls == [("focus_session", "claude-a")]
+
+
+def test_focus_session_without_on_result_replies_failed(env):
+    """An Actions without on_result (the demo controller) still gets a reply."""
+    store, _a, svc, client = env
+    calls = []
+
+    class Plain:
+        def focus_session(self, name):
+            calls.append(name)
+
+    svc.actions = Plain()
+    assert in_thread(lambda: client.call("FocusSession", "claude-a")) == "failed"
+    assert calls == ["claude-a"]
+
+
+def test_focus_session_with_the_real_controller_signature(env):
+    """Controller.focus_session reports a busy/unknown session through on_result."""
+    _s, _a, svc, client = env
+    from smartpanel.services.controller import Controller
+    assert svc_mod.accepts_on_result(Controller.focus_session)
+
+    class Unknown:
+        def focus_session(self, name, on_result=None):
+            GLib.idle_add(lambda: on_result("failed") and False)
+
+    svc.actions = Unknown()
+    assert in_thread(lambda: client.call("FocusSession", "claude-nope")) == "failed"
+
+
 def test_focus_session_result_travels_as_event(env):
-    """SP-1701 plumbing: the ladder's outcome reaches D-Bus callers as an Event."""
+    """SP-1701 plumbing: the ladder's outcome also reaches D-Bus callers as an Event."""
     _s, _a, _svc, client = env
     got = []
     undo = client.watch_events(lambda kind, data: got.append((kind, data)))
@@ -406,6 +494,7 @@ def test_get_state_hud_view_is_reduced(env):
         system.cpu.percent, system.memory.percent = 12.0, 64.0
         system.swap.percent, system.swap.level = 92.0, 2
         system.disk.percent = 71.0
+        system.net.down_bps = 2_400_000.0
         system.cpu.history = [1.0] * 300
     store.mutate("system", fill)
     store.mutate("sessions", lambda s: s.items.extend([
@@ -414,20 +503,26 @@ def test_get_state_hud_view_is_reduced(env):
         Session(name="claude-b", project="b"),
     ]))
     store.update("app", first_run=False)
+    store.update("settings", values={"hud.enabled": True, "hud.corner": "top-left",
+                                     "hud.margin": 12, "budget.daily_usd": 30})
 
     state = in_thread(lambda: client.get_state(["hud"]))
     assert set(state) == {"hud"}
     hud = state["hud"]
-    assert set(hud) == {"spend", "sessions", "metrics", "swap_level", "loading",
-                        "first_run"}
+    assert set(hud) == {"spend", "sessions", "system", "app", "settings"}
     assert hud["spend"] == {"cost_today": 23.84, "tokens_today": 41_200_000,
                             "tokens_today_human": "41.2M", "burn_per_hour": 3.1}
-    assert hud["metrics"] == {"cpu": 12.0, "memory": 64.0, "swap": 92.0, "disk": 71.0}
-    assert hud["swap_level"] == 2
-    assert hud["loading"] is None and hud["first_run"] is False
-    assert [set(s) for s in hud["sessions"]] == [{"name", "title", "activity", "phase"}] * 2
-    assert hud["sessions"][0]["title"] == "Fix it"
-    assert hud["sessions"][1]["title"] == "b"          # display_title fallback
+    assert hud["system"] == {"cpu": {"percent": 12.0}, "memory": {"percent": 64.0},
+                             "swap": {"percent": 92.0, "level": 2},
+                             "net": {"down_bps": 2_400_000.0}}
+    assert hud["app"] == {"loading": None, "first_run": False}
+    assert hud["settings"] == {"values": {"hud.enabled": True, "hud.corner": "top-left",
+                                          "hud.margin": 12}}
+    assert hud["sessions"]["tmux_ok"] is True
+    items = hud["sessions"]["items"]
+    assert [set(s) for s in items] == [{"name", "title", "project", "activity", "phase"}] * 2
+    assert items[0]["title"] == "Fix it"
+    assert items[1]["title"] == "b"          # display_title fallback
 
     def no_lists_of_numbers(obj):
         if isinstance(obj, dict):
@@ -438,13 +533,54 @@ def test_get_state_hud_view_is_reduced(env):
     assert no_lists_of_numbers(hud), "HUD view must carry no history arrays"
 
 
+def _paths(obj, prefix=""):
+    out = set()
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            p = f"{prefix}.{k}" if prefix else k
+            out.add(p)
+            out |= _paths(v, p)
+    elif isinstance(obj, list) and obj:
+        out |= _paths(obj[0], prefix + "[]")
+    return out
+
+
+def test_hud_view_carries_every_field_the_extension_reads():
+    """hud_view is the state tree pruned to hudmodel.js's reads (test_hud_extension's
+    HUD_READS), nothing else — so the extension can switch to GetState(['hud'])."""
+    from smartpanel.demo.scenarios import build_state
+    from tests.test_hud_extension import HUD_READS
+    st = build_state("busy")
+    st.settings.values = {"hud.enabled": True, "hud.corner": "top-right", "hud.margin": 30}
+    from smartpanel.state.model import Loading
+    st.app.loading = Loading(done=1, total=2)        # so loading's fields are present
+    view = svc_mod.hud_view(st)
+    paths = {p for p in _paths(view) if not p.startswith("settings.values.")}
+    assert HUD_READS <= paths, HUD_READS - paths
+    prefixes = {r.rsplit(".", 1)[0] for r in HUD_READS} | {r.split(".")[0] for r in HUD_READS}
+    prefixes |= {p.removesuffix("[]") for p in prefixes}
+    extra = paths - HUD_READS - prefixes
+    assert not extra, extra
+
+
+def test_hud_view_is_small():
+    from smartpanel.demo.scenarios import build_state
+    store = Store()
+    st = build_state("many")
+    for section in ("spend", "sessions", "system", "app", "settings"):
+        store.mutate(section, lambda cur, new=getattr(st, section): cur.__dict__.update(
+            new.__dict__))
+    full = svc_mod.state_json(store, {"spend", "sessions", "system", "settings", "app"})
+    hud = svc_mod.state_json(store, {svc_mod.HUD})
+    assert len(hud) < 2048 and len(hud) * 5 < len(full), (len(hud), len(full))
+
+
 def test_get_state_hud_loading(env):
     store, _a, _svc, client = env
     from smartpanel.state.model import Loading
     store.update("app", loading=Loading(done=3, total=10), first_run=True)
     hud = in_thread(lambda: client.get_state(["hud"]))["hud"]
-    assert hud["loading"] == {"done": 3, "total": 10}
-    assert hud["first_run"] is True
+    assert hud["app"] == {"loading": {"done": 3, "total": 10}, "first_run": True}
 
 
 def test_get_state_hud_must_be_alone(env):
@@ -507,3 +643,54 @@ def test_client_survives_malformed_event_and_failing_handler(env):
     undo()
     undo2()
     assert got == [("toast", {}), ("toast", {})]
+
+
+_EQUIV_JS = """
+import GLib from 'gi://GLib';
+import System from 'system';
+import {buildHudModel, hudSettings} from '%(hudmodel)s';
+const read = p => JSON.parse(new TextDecoder().decode(GLib.file_get_contents(p)[1]));
+let bad = 0;
+for (const name of %(names)s) {
+    const full = read(`%(dir)s/${name}.full.json`);
+    const hud = read(`%(dir)s/${name}.hud.json`).hud;
+    const a = JSON.stringify([buildHudModel(full), hudSettings(full)]);
+    const b = JSON.stringify([buildHudModel(hud), hudSettings(hud)]);
+    if (a !== b) { bad++; printerr(`${name}:\\n full ${a}\\n hud  ${b}`); }
+}
+System.exit(bad ? 1 : 0);
+"""
+
+
+@pytest.mark.skipif(__import__("shutil").which("gjs") is None, reason="gjs not installed")
+def test_hudmodel_draws_the_same_from_the_hud_view(tmp_path):
+    """The extension's own model code, fed GetState(['hud']) instead of the five full
+    sections, draws exactly the same HUD in every demo scenario."""
+    import subprocess
+    from pathlib import Path
+    from smartpanel.demo.scenarios import build_state
+    from smartpanel.state.model import Loading
+    names = []
+    for name in ("busy", "calm", "alert", "empty", "many", "cold", "first", "notmux",
+                 "noswap"):
+        st = build_state(name)
+        st.settings.values = {"hud.enabled": True, "hud.corner": "bottom-left",
+                              "hud.margin": 18}
+        if name == "cold":
+            st.app.loading = st.app.loading or Loading(done=4, total=9)
+        store = Store()
+        for section in ("spend", "sessions", "system", "app", "settings"):
+            store.mutate(section, lambda cur, new=getattr(st, section):
+                         cur.__dict__.update(new.__dict__))
+        (tmp_path / f"{name}.full.json").write_text(svc_mod.state_json(
+            store, {"spend", "sessions", "system", "settings", "app"}))
+        (tmp_path / f"{name}.hud.json").write_text(svc_mod.state_json(store, {svc_mod.HUD}))
+        names.append(name)
+    hudmodel = (Path(__file__).resolve().parent.parent / "extension"
+                / "smartpanel-hud@omdev.dev" / "hudmodel.js")
+    script = tmp_path / "equiv.js"
+    script.write_text(_EQUIV_JS % {"hudmodel": hudmodel.as_uri(), "names": json.dumps(names),
+                                   "dir": str(tmp_path)})
+    proc = subprocess.run(["gjs", "-m", str(script)], capture_output=True, text=True,
+                          timeout=60)
+    assert proc.returncode == 0, proc.stderr

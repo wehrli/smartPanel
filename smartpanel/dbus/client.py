@@ -6,7 +6,7 @@ than the service::
     c = PanelClient()                      # session bus, dev.omdev.SmartPanel
     c.version                              # -> 1
     c.get_state(["spend"])                 # -> {"spend": {...}}
-    c.call("FocusSession", "claude-ledgerly")
+    c.call("FocusSession", "claude-ledgerly")  # -> "raised" | "reattached" | "failed"
     c.call("SetSetting", "hud.enabled", True)   # a Python value, JSON-encoded for you
     c.set_setting_json("hud.enabled", "true")    # already-encoded JSON text
     undo = c.watch_changed(lambda sections: ...)   # needs a running GLib main loop
@@ -34,7 +34,8 @@ DEFAULT_TIMEOUT_MS = 5000
 
 log = logging.getLogger(__name__)
 
-# Method name -> GVariant input signature (mirrors panel1.xml).
+# Method name -> GVariant input signature (mirrors panel1.xml). Out args are read from
+# the reply: FocusSession returns "s" (raised | reattached | failed), GetState "s".
 SIGNATURES: dict[str, str] = {
     "GetState": "(as)",
     "OpenDashboard": "(s)",

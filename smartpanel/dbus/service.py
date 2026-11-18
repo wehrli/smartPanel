@@ -23,47 +23,61 @@ What the interface does
 - ``Event(s kind, s data)`` mirrors every ``state.model.Event`` the store emits (toasts,
   confirm dialogs, navigation), immediately and uncoalesced: they are one-shot.
 - Every action method maps 1:1 onto ``state.actions.Actions`` and returns immediately
-  (the Actions contract forbids blocking). ``SetSetting`` takes its value as a JSON
-  string and decodes it before calling ``Actions.set_setting``. Results the user should
-  see come back as ``Event`` signals, never as return values; this is also how
-  ``FocusSession``'s ladder result (raised / re-attached / failed, SP-1701) travels: as
-  the ``toast`` Event the controller emits, and as ``Session.attached`` in the next
-  ``sessions`` change.
+  (the Actions contract forbids blocking). Results the user should see come back as
+  ``Event`` signals, never as return values, with one exception:
+- ``FocusSession(s name) -> s result`` replies with the focus ladder's outcome,
+  ``raised`` / ``reattached`` / ``failed`` (SP-1701), once the ladder has run on the
+  controller's worker. The handler returns at once; the reply is sent from the
+  ``on_result`` callback ``Controller.focus_session`` posts back to the main thread. An
+  Actions implementation without ``on_result`` (the demo controller) is called plainly
+  and the reply is ``failed``: no real window was raised. The same outcome also shows
+  up as the ``toast`` Event and as ``Session.attached`` in the next ``sessions`` change.
+- ``SetSetting`` takes its value as a JSON string and decodes it, then checks it here,
+  before calling ``Actions.set_setting`` (whose own failures only toast, for the GTK
+  callers): an unknown key or an invalid value is ``InvalidArgs``, a key an env var
+  owns (``settings.overridden_by``) is ``dev.omdev.SmartPanel1.Error.Overridden``. A
+  rejected remote call never reaches the controller, so it never toasts in the user's UI.
 - A failing action becomes a D-Bus error reply with a readable message
   (``dev.omdev.SmartPanel1.Error.Failed``). Nothing raised by an action or a listener
   can reach the GLib loop.
 
 Low-rate consumers (the desktop HUD extension, SP-2301)
 -------------------------------------------------------
-The HUD only shows the spend line, the session list, four metrics and the swap alert
-level, and refreshes every 5 s rather than every 2 s. Rather than a new method (the
-interface in panel1.xml is fixed), ``GetState`` accepts the pseudo-section ``"hud"``,
-which returns a small reduced view built by ``hud_view()``::
+The HUD draws the spend line, up to four session rows, cpu / memory / swap / net-down
+and the swap alert, placed by ``hud.enabled`` / ``hud.corner`` / ``hud.margin``. Rather
+than a new method (the interface in panel1.xml is fixed), ``GetState`` accepts the
+pseudo-section ``"hud"``, which returns ``hud_view()``: the **same tree shape** as the
+real sections, pruned to exactly the fields ``extension/.../hudmodel.js`` reads, so
+``buildHudModel(reply.hud)`` and ``hudSettings(reply.hud)`` work unchanged::
 
     {"hud": {
         "spend":    {"cost_today", "tokens_today", "tokens_today_human", "burn_per_hour"},
-        "sessions": [{"name", "title", "activity", "phase"}, ...],   # display order
-        "metrics":  {"cpu", "memory", "swap", "disk"},                # percents or null
-        "swap_level": int,                                            # LEVEL_* of alerts
-        "loading":  null | {"done", "total"},   # HUD shows "…" while non-null
-        "first_run": bool                       # HUD shows "—"
+        "sessions": {"tmux_ok": bool,
+                     "items": [{"name", "title", "project", "activity", "phase"}, ...]},
+        "system":   {"cpu": {"percent"}, "memory": {"percent"},
+                     "swap": {"percent", "level"}, "net": {"down_bps"}},
+        "app":      {"loading": null | {"done", "total"}, "first_run": bool},
+        "settings": {"values": {"hud.enabled", "hud.corner", "hud.margin"}}
     }}
 
-No history arrays, no per-day breakdowns, no prompts. ``"hud"`` must be requested
+About 1 KB instead of about 15 KB for the five full sections: no history arrays, no
+per-day breakdowns, no prompts, no other settings. ``"hud"`` must be requested
 **alone**: mixing it with real sections is an ``InvalidArgs`` error, so a reply is either
 a slice of the state tree or the HUD view, never an ambiguous mix.
 
 The rate limit is the client's, by design (a signal-driven server cannot know a
-consumer's cadence). The recipe:
+consumer's cadence). The intended recipe:
 
 1. On connect, read ``Version``; then ``GetState(['hud'])`` once.
-2. Subscribe to ``Changed``. When it fires and its sections intersect ``HUD_SECTIONS``
-   (``spend``, ``sessions``, ``system``, ``app``), mark the HUD *dirty* — do not fetch.
-3. Run one 5 s timer. On each tick, if dirty, call ``GetState(['hud'])``, clear the
-   flag, redraw.
+2. Subscribe to ``Changed``. Ignore it unless its sections intersect ``HUD_SECTIONS``
+   (``spend``, ``sessions``, ``system``, ``app``, ``settings``; a ``journal``-only
+   change never touches the HUD). A ``settings`` change is urgent (the HUD may have
+   been switched on or moved); anything else is throttled.
+3. Fetch at most once per 5 s: one trailing ``GetState(['hud'])`` per window.
 
-That gives the HUD a hard ceiling of one small call per 5 s and zero calls while
-nothing changes. ``Event`` can be ignored by the HUD.
+At the time of writing the extension still implements step 3 with
+``GetState(['spend','sessions','system','settings','app'])`` and does not filter
+``journal``-only changes; it reads the same fields either way.
 
 History trimming (SP-0006): the Store keeps up to 300 points per series, but over D-Bus
 every ``history*`` list under ``system`` is cut to its newest ``HISTORY_POINTS`` (60).
@@ -74,6 +88,7 @@ service was exported from, and the coalescing timer is a GLib timeout.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from importlib import resources
@@ -81,6 +96,7 @@ from typing import Any, Callable
 
 from gi.repository import Gio, GLib
 
+from smartpanel import config as config_mod
 from smartpanel.state.model import SECTIONS, Event
 from smartpanel.state.store import to_dict
 
@@ -93,15 +109,22 @@ SCHEMA_VERSION = 1
 CHANGED_WINDOW_MS = 250
 HISTORY_POINTS = 60                      # newest points per series sent over D-Bus
 HUD = "hud"                              # GetState pseudo-section (SP-2301)
-HUD_SECTIONS = ("spend", "sessions", "system", "app")   # what the HUD view reads
+HUD_SECTIONS = ("spend", "sessions", "system", "app", "settings")  # what hud_view reads
+HUD_SETTINGS = ("hud.enabled", "hud.corner", "hud.margin")
 
 ERROR_FAILED = f"{INTERFACE}.Error.Failed"
+ERROR_OVERRIDDEN = f"{INTERFACE}.Error.Overridden"
+FOCUS_FAILED = "failed"                  # == sessions.focus.FAILED
 ERROR_INVALID_ARGS = "org.freedesktop.DBus.Error.InvalidArgs"
 ERROR_UNKNOWN_METHOD = "org.freedesktop.DBus.Error.UnknownMethod"
 
 
 class InvalidArgs(ValueError):
     """A caller error: reported as org.freedesktop.DBus.Error.InvalidArgs."""
+
+
+class Overridden(ValueError):
+    """SetSetting on a key an env var owns: reported as Error.Overridden."""
 
 
 def introspection_xml() -> str:
@@ -156,8 +179,10 @@ def trim_histories(state: dict, points: int = HISTORY_POINTS) -> dict:
 
 
 def hud_view(state) -> dict:
-    """PanelState -> the reduced HUD view (see the module docstring)."""
-    sp, sy, app = state.spend, state.system, state.app
+    """PanelState -> the reduced HUD view: the state tree pruned to what the HUD reads
+    (see the module docstring)."""
+    sp, sy, ss, app = state.spend, state.system, state.sessions, state.app
+    values = state.settings.values or {}
     return {
         "spend": {
             "cost_today": sp.cost_today,
@@ -165,20 +190,25 @@ def hud_view(state) -> dict:
             "tokens_today_human": sp.tokens_today_human,
             "burn_per_hour": sp.burn_per_hour,
         },
-        "sessions": [
-            {"name": s.name, "title": s.display_title,
-             "activity": s.activity, "phase": s.phase}
-            for s in state.sessions.items
-        ],
-        "metrics": {
-            "cpu": sy.cpu.percent,
-            "memory": sy.memory.percent,
-            "swap": sy.swap.percent,
-            "disk": sy.disk.percent,
+        "sessions": {
+            "tmux_ok": bool(ss.tmux_ok),
+            "items": [
+                {"name": s.name, "title": s.display_title, "project": s.project,
+                 "activity": s.activity, "phase": s.phase}
+                for s in ss.items
+            ],
         },
-        "swap_level": int(sy.swap.level),
-        "loading": to_dict(app.loading),
-        "first_run": bool(app.first_run),
+        "system": {
+            "cpu": {"percent": sy.cpu.percent},
+            "memory": {"percent": sy.memory.percent},
+            "swap": {"percent": sy.swap.percent, "level": int(sy.swap.level)},
+            "net": {"down_bps": sy.net.down_bps},
+        },
+        "app": {
+            "loading": to_dict(app.loading),
+            "first_run": bool(app.first_run),
+        },
+        "settings": {"values": {k: values[k] for k in HUD_SETTINGS if k in values}},
     }
 
 
@@ -200,6 +230,31 @@ def decode_setting(key: str, json_value: str) -> Any:
         raise InvalidArgs(f"SetSetting {key}: value is not valid JSON ({exc})") from None
 
 
+def check_setting(store, key: str, value: Any) -> None:
+    """Refuse what ``Config.set`` would refuse, so the remote caller gets the error.
+
+    Validation is ``config.validate`` (unknown key or bad value -> InvalidArgs); env
+    ownership is read from ``store.settings.overridden_by``, which ``Config`` mirrors.
+    """
+    try:
+        config_mod.validate(key, value)
+    except ValueError as exc:
+        raise InvalidArgs(f"SetSetting: {exc}") from None
+    try:
+        owner = (store.state.settings.overridden_by or {}).get(key)
+    except AttributeError:
+        owner = None
+    if owner:
+        raise Overridden(f"{key} is set by {owner}; unset it to change this here")
+
+
+def accepts_on_result(fn) -> bool:
+    try:
+        return "on_result" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def event_json(event: Event) -> str:
     """Event.data -> compact JSON; tolerant of dataclasses and odd values."""
     return json.dumps(to_dict(event.data), separators=(",", ":"), default=str)
@@ -212,7 +267,6 @@ _ACTIONS: dict[str, tuple[str, Callable[[tuple], tuple]]] = {
     "OpenPalette": ("open_palette", lambda a: ()),
     "SetHud": ("set_hud", lambda a: (bool(a[0]),)),
     "PinTicker": ("pin_ticker", lambda a: (bool(a[0]),)),
-    "FocusSession": ("focus_session", lambda a: (a[0],)),
     "RetitleSession": ("retitle_session", lambda a: (a[0],)),
     "RequestClose": ("request_close", lambda a: (a[0],)),
     "CloseSession": ("close_session", lambda a: (a[0], bool(a[1]))),
@@ -319,16 +373,48 @@ class PanelService:
                 payload = state_json(self.store, parse_sections(args[0]))
                 invocation.return_value(GLib.Variant("(s)", (payload,)))
                 return
+            if method == "FocusSession":
+                self._focus_session(args[0], invocation)
+                return
             entry = _ACTIONS.get(method)
             if entry is None:
                 invocation.return_dbus_error(ERROR_UNKNOWN_METHOD, f"no method {method}")
                 return
             attr, adapt = entry
-            getattr(self.actions, attr)(*adapt(args))
+            call_args = adapt(args)
+            if method == "SetSetting":
+                check_setting(self.store, *call_args)
+            getattr(self.actions, attr)(*call_args)
             invocation.return_value(None)
         except InvalidArgs as exc:
             invocation.return_dbus_error(ERROR_INVALID_ARGS, str(exc))
+        except Overridden as exc:
+            invocation.return_dbus_error(ERROR_OVERRIDDEN, str(exc))
         except Exception as exc:
             log.exception("D-Bus %s failed", method)
             invocation.return_dbus_error(
                 ERROR_FAILED, f"{method} failed: {type(exc).__name__}: {exc}")
+
+    def _focus_session(self, name: str, invocation) -> None:
+        """Reply with the ladder's result once it arrives (exactly once)."""
+        fn = self.actions.focus_session
+        if not accepts_on_result(fn):
+            fn(name)
+            invocation.return_value(GLib.Variant("(s)", (FOCUS_FAILED,)))
+            return
+        replied: list[bool] = []
+
+        def on_result(result: str) -> None:
+            if replied:
+                return
+            replied.append(True)
+            invocation.return_value(GLib.Variant("(s)", (str(result or FOCUS_FAILED),)))
+
+        try:
+            fn(name, on_result=on_result)
+        except Exception:
+            if replied:          # pragma: no cover - replied, then raised
+                log.exception("D-Bus FocusSession failed after replying")
+                return
+            replied.append(True)
+            raise
