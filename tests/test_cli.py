@@ -122,6 +122,13 @@ def _run(args, tmp_path, code=None):
     env = dict(os.environ, HOME=str(tmp_path), PYTHONPATH=str(ROOT))
     env.pop("DISPLAY", None)
     env.pop("WAYLAND_DISPLAY", None)
+    env.pop("GDK_BACKEND", None)
+    env.pop("BROADWAY_DISPLAY", None)
+    # GTK falls back to $XDG_RUNTIME_DIR/wayland-0, so an inherited runtime dir
+    # would still reach the real compositor: give it an empty one.
+    run_dir = tmp_path / "xdg-run"
+    run_dir.mkdir(mode=0o700, exist_ok=True)
+    env["XDG_RUNTIME_DIR"] = str(run_dir)
     return subprocess.run([sys.executable, "-c", code] if code else
                           [sys.executable, "-m", "smartpanel", *args],
                           capture_output=True, text=True, env=env, timeout=60, cwd=tmp_path)
@@ -156,3 +163,13 @@ def test_activation_token_from_platform_data():
     assert cli.activation_token({"activation-token": ""}) is None
     assert cli.activation_token({}) is None
     assert cli.activation_token(None) is None
+
+
+def test_headless_run_really_has_no_display(tmp_path):
+    """The `_run` helper must not reach a compositor through $XDG_RUNTIME_DIR."""
+    pytest.importorskip("gi")
+    code = ("import sys, gi; gi.require_version('Gtk', '4.0'); "
+            "from gi.repository import Gdk, Gtk; Gtk.init_check(); "
+            "sys.exit(1 if Gdk.Display.get_default() is not None else 0)")
+    r = _run([], tmp_path, code=code)
+    assert r.returncode == 0, "GTK found a display in the headless helper"

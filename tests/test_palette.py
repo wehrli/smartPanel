@@ -92,9 +92,11 @@ def test_nothing_matches():
     p.destroy()
 
 
-def test_store_change_refreshes_and_keeps_selection():
+def test_store_change_refreshes_and_keeps_selection(monkeypatch):
     p, store, _ = _palette()
-    p.set_visible(True)
+    # The refresh only runs while the palette is up. Fake that rather than map a
+    # real toplevel on the developer's desktop.
+    monkeypatch.setattr(p, "get_visible", lambda: True)
     _search(p, "go to")
     p.move(2)
     assert p.selected_command.id == "page:spend"
@@ -102,7 +104,7 @@ def test_store_change_refreshes_and_keeps_selection():
         0, Session("claude-new", project="np", title="New thing", activity=WAITING)))
     assert p.selected_command.id == "page:spend"
     assert "2 waiting" in p.status.get_text()
-    p.set_visible(False)
+    assert not Gtk.Widget.get_mapped(p)
     p.destroy()
 
 

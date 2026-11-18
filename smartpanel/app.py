@@ -189,8 +189,13 @@ class SmartPanelApp(Adw.Application):
                     f"at startup (restart the service to change it)\n")
 
         token = _platform_token(command_line)
-        for req in cli.requests_from(ns, remote=remote):
-            self._run_request(req, token=token)
+        from smartpanel import timing
+        # Timed under its own name: a forwarded `--dashboard PAGE` may build and
+        # map the window here, which the watchdog would otherwise pin on
+        # whichever timer ran last.
+        with timing.measure("app.command_line"):
+            for req in cli.requests_from(ns, remote=remote):
+                self._run_request(req, token=token)
         return 0
 
     def do_shutdown(self) -> None:
@@ -245,8 +250,22 @@ class SmartPanelApp(Adw.Application):
 
         if getattr(ns, "debug_timing", False):
             from smartpanel import timing
-            timing.install()
+            # The watchdog starts once the loop is idle, not here: the wiring
+            # below runs before the loop does, and that one-off startup cost is
+            # reported as `app.startup`, not as a steady-state stall.
+            timing.install(watchdog=False)
             self._timing = True
+            started_at = timing.clock()
+            hook = GLib.idle_add   # identifies this install; a re-install replaces it
+
+            def _startup_done() -> bool:
+                if not timing.installed() or GLib.idle_add is not hook:
+                    return GLib.SOURCE_REMOVE   # uninstalled (or re-installed) meanwhile
+                timing.record("app.startup", (timing.clock() - started_at) * 1000.0,
+                              budget=float("inf"))
+                timing.start_watchdog(GLib)
+                return GLib.SOURCE_REMOVE
+            GLib.idle_add(_startup_done, priority=GLib.PRIORITY_LOW)
         self.theme = load_theme(cli.resolve_theme(ns.theme))
         self.config = Config.load()
 
@@ -296,6 +315,28 @@ class SmartPanelApp(Adw.Application):
         self.actions.target = controller
         self._wired = True
         self._start_tray()
+        self._prewarm_ui()
+
+    # Imported one per idle step after startup, so opening the dashboard the
+    # first time doesn't pay for them on top of building and mapping the window.
+    PREWARM_MODULES = ("smartpanel.ui.window", "smartpanel.ui.session_dialogs",
+                       *(f"smartpanel.ui.pages.{p}" for p in
+                         ("overview", "sessions", "spend", "system", "journal", "settings")))
+
+    def _prewarm_ui(self) -> None:
+        pending = list(self.PREWARM_MODULES)
+
+        def step() -> bool:
+            import importlib
+            if not pending:
+                return GLib.SOURCE_REMOVE
+            name = pending.pop(0)
+            try:
+                importlib.import_module(name)
+            except Exception:  # noqa: BLE001 — the real import will report it
+                log.debug("prewarm of %s failed", name, exc_info=True)
+            return GLib.SOURCE_CONTINUE if pending else GLib.SOURCE_REMOVE
+        GLib.idle_add(step, priority=GLib.PRIORITY_LOW)
 
     def _start_tray(self) -> None:
         if self._connection is None:
@@ -335,12 +376,19 @@ class SmartPanelApp(Adw.Application):
 
     def ensure_window(self):
         if self.window is None:
-            from smartpanel.ui.window import MainWindow
-            self.window = MainWindow(self, self.store, self.actions, self.config)
+            from smartpanel import timing
+            with timing.measure("ui.ensure_window"):
+                from smartpanel.ui.window import MainWindow
+                self.window = MainWindow(self, self.store, self.actions, self.config)
         return self.window
 
     def show_dashboard(self, page: str = "") -> None:
-        self.ensure_window().present_page(page)
+        from smartpanel import timing
+        window = self.ensure_window()
+        # present() maps the window, and the first map realizes the surface and
+        # its renderer: the bulk of a first open. Named so a stall is blamed here.
+        with timing.measure("ui.present_dashboard"):
+            window.present_page(page)
 
     def show_palette(self, token: str | None = None) -> None:
         if self.palette is None:
@@ -361,7 +409,9 @@ class SmartPanelApp(Adw.Application):
         from smartpanel import notify
         from smartpanel.ui import shellmodel
         model = shellmodel.toast_model(data)
-        if model is not None:
+        # A toast that mirrors a desktop notification the sender already raised
+        # (journal written / failed) must not become a second bubble.
+        if model is not None and not model.notified:
             # Always "normal": GNOME pins "critical" bubbles until dismissed, and a
             # routine error toast must not become a sticky banner. (The swap
             # alert, which owns critical urgency, goes through collect/system.py.)
@@ -369,10 +419,12 @@ class SmartPanelApp(Adw.Application):
                         key="smartpanel-toast")
 
     def _open_session_dialog(self, kind: str, data: dict) -> None:
+        from smartpanel import timing
         from smartpanel.ui import session_dialogs
         window = self.ensure_window()
         if not window.get_visible():
-            window.present_page("sessions")
+            with timing.measure("ui.present_dashboard"):
+                window.present_page("sessions")
         try:
             if kind == "confirm_close":
                 session_dialogs.confirm_close(window, self.store, self.actions, self.config,

@@ -27,12 +27,14 @@ class Banner(Adw.Bin):
         self._on_action = on_action
         self.banner.connect("button-clicked", self._clicked)
 
-    def show(self, text: str, level: int = LEVEL_WARNING, action_label: str | None = None) -> bool:
-        key = (text, level, action_label)
+    def show(self, text: str, level: int = LEVEL_WARNING, action_label: str | None = None,
+             tooltip: str | None = None) -> bool:
+        key = (text, level, action_label, tooltip)
         if key == self._key:
             return False
         self._key = key
         self.banner.set_title(text)
+        self.banner.set_tooltip_text(tooltip if tooltip and tooltip != text else None)
         self.banner.set_button_label(action_label or None)
         if level != self._level:
             if self._level in _CLASS:

@@ -229,6 +229,8 @@ def test_banner_follows_swap_and_page(shell):
 def test_footer(shell):
     win, store, *_ = shell
     assert win.footer_version.get_text() == "v0.4.0 · Ubuntu 26.04"
+    # Wraps instead of ellipsizing, so the demo scenario name is never cut off.
+    assert win.footer_version.get_wrap() and win.footer_version.get_ellipsize() == 0
     store.update("system", updated_at=time.time() - 3)
     assert win.footer_status.get_text() in ("Updated 3 s ago", "Updated 4 s ago")
     store.update("app", loading=Loading(1, 10))
@@ -250,6 +252,18 @@ def test_toasts_replace_and_style_errors(shell):
     _drain()
     assert not win.toast_overlay.has_css_class("sp-toast-error")
     assert win.toasts.show({"text": ""}) is None
+
+
+def test_toast_action_focuses_the_named_session(shell):
+    win, _store, actions, _ = shell
+    t = win.toasts.show({"text": "Open the terminal to answer.",
+                         "action": {"label": "Open", "page": "sessions",
+                                    "focus": "claude-x"}})
+    t.emit("button-clicked")
+    assert win.page == "sessions"
+    assert ("focus_session", ("claude-x",)) in actions.calls
+    t.dismiss()
+    _drain()
 
 
 def test_keyboard_actions(shell):
@@ -426,6 +440,10 @@ def test_app_routes_events_without_a_window(monkeypatch):
     app._on_event(Event("toast", {"text": "Install tmux first", "error": True}))
     assert sent[-1][0][1] == "Install tmux first"
     assert sent[-1][1]["urgency"] == "normal"
+    # A toast that mirrors a notification the sender already raised: no 2nd bubble.
+    n = len(sent)
+    app._on_event(Event("toast", {"text": "Journaled & closed", "notified": True}))
+    assert len(sent) == n
 
 
 def test_demo_wiring(monkeypatch, tmp_path):
@@ -571,3 +589,61 @@ def test_debug_timing_installs_the_hook_when_wiring(monkeypatch, tmp_path):
             if stop is not None:
                 stop(svc)
         app._services.clear()
+
+
+# ───────────────────────── main-loop budget (SP-2702) ─────────────────────────
+
+def test_debug_timing_watchdog_starts_after_startup(monkeypatch, tmp_path):
+    """Startup is reported as `app.startup`, never as a main-loop stall."""
+    from smartpanel import cli, notify, timing
+    from smartpanel.app import SmartPanelApp
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(notify, "send", lambda *a, **k: True)
+    timing.reset()
+    app = SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
+    try:
+        app._wire(cli.parse_args(["--demo", "calm", "--debug-timing"]))
+        assert timing.installed() and timing._watchdog is None
+        deadline = time.monotonic() + 5
+        while timing._watchdog is None and time.monotonic() < deadline:
+            GLib.MainContext.default().iteration(False)
+        assert timing._watchdog is not None
+        st = timing.stats()["app.startup"]
+        assert st.calls == 1 and st.slow == 0
+        assert timing.LAG_NAME not in timing.stats()
+    finally:
+        timing.uninstall()
+        timing.reset()
+        for svc in app._services:
+            stop = type(svc).__dict__.get("stop")
+            if stop is not None:
+                stop(svc)
+        app._services.clear()
+
+
+def test_first_window_build_is_timed_under_its_own_name(monkeypatch, tmp_path):
+    from smartpanel import timing
+    from smartpanel.app import SmartPanelApp
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    timing.reset()
+    app = SmartPanelApp(application_id="dev.omdev.SmartPanel.Test")
+    app.config = FakeConfig()
+    try:
+        win = app.ensure_window()
+        assert app.ensure_window() is win
+        assert timing.stats()["ui.ensure_window"].calls == 1
+        assert not win.get_mapped()
+    finally:
+        if app.window is not None:
+            app.window.shutdown()
+            app.window.destroy()
+            app.window = None
+        timing.reset()
+
+
+def test_prewarm_modules_all_import():
+    import importlib
+    from smartpanel.app import SmartPanelApp
+    for name in SmartPanelApp.PREWARM_MODULES:
+        importlib.import_module(name)
