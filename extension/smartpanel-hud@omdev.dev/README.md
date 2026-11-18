@@ -31,5 +31,6 @@ drawn on the wallpaper **behind every window**. GNOME Shell 50, ESM.
 
 ## Install
 
-`scripts/install-hud.sh` runs pack and install. Then log out and back in (Wayland), run
+`scripts/install-hud.sh` runs pack and install; it never enables the extension, so
+re-running it leaves a HUD you switched off switched off. Then log out and back in (Wayland), run
 `gnome-extensions enable smartpanel-hud@omdev.dev`, and turn the HUD on in smartPanel.

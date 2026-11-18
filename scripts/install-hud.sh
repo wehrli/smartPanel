@@ -2,7 +2,7 @@
 # Install the smartPanel desktop HUD (GNOME Shell extension smartpanel-hud@omdev.dev)
 # for the current user.
 #
-#   ./scripts/install-hud.sh            pack + install (+ enable if the shell knows it)
+#   ./scripts/install-hud.sh            pack + install (never enables it: that step is yours)
 #   ./scripts/install-hud.sh --pack     only build the .zip into dist/
 #   ./scripts/install-hud.sh --dry-run  print what would run, change nothing
 #
@@ -14,14 +14,14 @@ set -euo pipefail
 UUID="smartpanel-hud@omdev.dev"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$ROOT/extension/$UUID"
-OUT="$ROOT/dist"
+OUT="${SMARTPANEL_HUD_OUT:-$ROOT/dist}"   # override: where the .zip goes
 
 MODE=install
 case "${1:-}" in
   "") ;;
   --pack) MODE=pack ;;
   --dry-run|-n) MODE=dry ;;
-  -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
 esac
 
@@ -72,8 +72,7 @@ fi
 cat <<EOF
 
 Next steps:
-  1. Log out and back in. On Wayland GNOME Shell only discovers new extensions at
-     login (on X11, Alt+F2 then 'r' also works).
+  1. Log out and back in (GNOME Shell 50 picks up new extensions at login).
   2. Enable it:   gnome-extensions enable $UUID
      (or in the Extensions app).
   3. Turn the HUD on in smartPanel: bar menu "Desktop HUD", Settings, or
@@ -82,7 +81,3 @@ Next steps:
 Remove it with:  gnome-extensions uninstall $UUID
 EOF
 
-# Already known to this shell (re-install / X11 reload): enable now, harmless otherwise.
-if [[ $MODE == install ]] && gnome-extensions info "$UUID" >/dev/null 2>&1; then
-  gnome-extensions enable "$UUID" 2>/dev/null && echo "(enabled $UUID)" || true
-fi
