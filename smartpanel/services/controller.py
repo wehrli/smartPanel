@@ -273,8 +273,27 @@ class Controller:
             self._close_now(s, "")
             return
         cwd = s.cwd or tmux.session_cwd(name, run=self.run)  # before any kill
+        shared = self._shared_cwds()
         self.sessions.begin_journal(name)
-        self._spawn(lambda: self._journal_worker([(s, cwd)]), "smartpanel-journal")
+        self._spawn(lambda: self._journal_worker([(s, cwd)], shared=shared),
+                    "smartpanel-journal")
+
+    def _shared_cwds(self) -> set[str]:
+        """Folders more than one known session runs in (SP-1602).
+
+        A transcript is found by cwd, so in these folders the newest `*.jsonl`
+        may be a sibling's, and the journal run must not trust it. Counted over
+        every session the panel knows, including ones closing in this same
+        batch: a sibling killed a moment ago still owns the newest file.
+        """
+        seen: dict[str, set[str]] = {}
+        for s in self.store.state.sessions.items:
+            if s.cwd and s.phase != PHASE_LAUNCHING:
+                seen.setdefault(s.cwd, set()).add(s.name)
+        for name, cwd in self.sessions.cwds.items():
+            if cwd:
+                seen.setdefault(cwd, set()).add(name)
+        return {cwd for cwd, names in seen.items() if len(names) > 1}
 
     def _close_now(self, s: Session, reason: str | None) -> None:
         tmux.kill_session(s.name, run=self.run)
@@ -311,14 +330,16 @@ class Controller:
             self.store.toast("All sessions closed")
             return
         queue = [(s, s.cwd or tmux.session_cwd(s.name, run=self.run)) for s in worth]
+        shared = self._shared_cwds()
         self._closing_all = True
         self.store.update("sessions", close_all=Loading(done=len(young), total=len(items)))
         for s, _ in queue:
             self.sessions.begin_journal(s.name)
-        self._spawn(lambda: self._journal_worker(queue, close_all=True), "smartpanel-close-all")
+        self._spawn(lambda: self._journal_worker(queue, close_all=True, shared=shared),
+                    "smartpanel-close-all")
 
     def _journal_worker(self, queue: list[tuple[Session, str | None]],
-                        close_all: bool = False) -> None:
+                        close_all: bool = False, shared: set[str] = frozenset()) -> None:
         """Worker thread: journal each session in turn, then close it.
 
         Sequential on purpose — the skill appends to one shared monthly log, and
@@ -340,7 +361,7 @@ class Controller:
                     title=session_title(s),
                     on_progress=lambda step, n=name, **kw: self._post(
                         lambda: self.sessions.journal_progress(n, step, **kw)),
-                    journal_dir=self.journal_dir)
+                    journal_dir=self.journal_dir, ambiguous=bool(cwd and cwd in shared))
             except Exception:  # noqa: BLE001
                 log.exception("journal failed for %s", name)
             finally:
