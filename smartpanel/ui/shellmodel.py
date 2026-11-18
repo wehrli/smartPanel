@@ -222,7 +222,7 @@ def footer_version(state: PanelState, os_name: str = "") -> str:
     if os_name:
         parts.append(os_name)
     if state.app.demo:
-        parts.append(f"demo {state.app.demo}")
+        parts.append(f"demo\u00a0{state.app.demo}")  # NBSP: wraps as one piece
     return " · ".join(parts)
 
 

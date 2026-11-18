@@ -155,7 +155,10 @@ class MainWindow(Adw.ApplicationWindow):
         footer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         footer.add_css_class("sp-footer")
         self.footer_status = Gtk.Label(xalign=0, ellipsize=3)  # END
-        self.footer_version = Gtk.Label(xalign=0, ellipsize=3)
+        # Wraps rather than ellipsizes: the tail ('demo notmux') is the part an
+        # ellipsis would eat. WORD_CHAR (2) so a long OS name can still break.
+        self.footer_version = Gtk.Label(xalign=0, wrap=True, wrap_mode=2)
+        self.footer_version.set_max_width_chars(1)  # never widen the sidebar
         footer.append(self.footer_status)
         footer.append(self.footer_version)
 

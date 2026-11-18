@@ -160,7 +160,7 @@ def test_footer_version_line(tmp_path):
     s.app.version = "0.4.0"
     assert sm.footer_version(s, "Ubuntu 26.04") == "v0.4.0 · Ubuntu 26.04"
     s.app.demo = "busy"
-    assert sm.footer_version(s, "") == "v0.4.0 · demo busy"
+    assert sm.footer_version(s, "") == "v0.4.0 · demo\u00a0busy"
 
 
 # ── toasts (SP-2502) ──

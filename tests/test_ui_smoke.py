@@ -229,6 +229,8 @@ def test_banner_follows_swap_and_page(shell):
 def test_footer(shell):
     win, store, *_ = shell
     assert win.footer_version.get_text() == "v0.4.0 · Ubuntu 26.04"
+    # Wraps instead of ellipsizing, so the demo scenario name is never cut off.
+    assert win.footer_version.get_wrap() and win.footer_version.get_ellipsize() == 0
     store.update("system", updated_at=time.time() - 3)
     assert win.footer_status.get_text() in ("Updated 3 s ago", "Updated 4 s ago")
     store.update("app", loading=Loading(1, 10))
