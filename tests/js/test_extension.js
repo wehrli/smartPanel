@@ -2,7 +2,7 @@
 // Run: gjs -m tests/js/test_extension.js
 //
 // The extension's sources are copied to a temp dir (SMARTPANEL_HUD_TEST_TMP, else a
-// fresh GLib temp dir) with every shell/GI import rewritten to the fakes in ./stubs.
+// fresh GLib temp dir, removed again at the end) with every shell/GI import rewritten to the fakes in ./stubs.
 // Importing the copy is the syntax + link check (a typo'd named import fails here);
 // then the real enable()/disable() lifecycle is driven against a fake D-Bus service.
 //
@@ -45,8 +45,17 @@ function write(path, text) {
     GLib.file_set_contents(path, new TextEncoder().encode(text));
 }
 
+// Only a temp dir this script made itself is removed; SMARTPANEL_HUD_TEST_TMP belongs
+// to the caller (pytest's tmp_path).
+const OWN_TMP = GLib.getenv('SMARTPANEL_HUD_TEST_TMP') ? null : GLib.dir_make_tmp('smartpanel-hud-XXXXXX');
+
+function removeOwnTmp() {
+    if (OWN_TMP && OWN_TMP.includes('/smartpanel-hud-'))
+        GLib.spawn_sync(null, ['rm', '-rf', '--', OWN_TMP], null, GLib.SpawnFlags.SEARCH_PATH, null);
+}
+
 function stage() {
-    const base = GLib.getenv('SMARTPANEL_HUD_TEST_TMP') || GLib.dir_make_tmp('smartpanel-hud-XXXXXX');
+    const base = OWN_TMP ?? GLib.getenv('SMARTPANEL_HUD_TEST_TMP');
     const dir = `${base}/ext-${GLib.get_monotonic_time()}`;
     GLib.mkdir_with_parents(`${dir}/stubs`, 0o755);
     const unknown = [];
@@ -450,4 +459,4 @@ test('disable: everything torn down, late replies are harmless', async () => {
     ext.disable();
 });
 
-await run();
+await run({after: removeOwnTmp});

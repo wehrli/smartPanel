@@ -18,6 +18,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UUID="smartpanel-hud@omdev.dev"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/hud-smoke-XXXXXX")"
 RT="$(mktemp -d /tmp/hrt-XXXXXX)"        # short: wayland socket paths are capped at 108 bytes
+# gnome-shell fills $RT (at-spi, dbus-1, dconf, gvfs, pulse...), so rmdir can't remove it.
+# $WORK stays: it holds the outputs printed below.
+trap 'rm -rf -- "$RT"' EXIT
 chmod 700 "$RT"
 OUT="$WORK/out"
 EXTDIR="$WORK/data/gnome-shell/extensions"
@@ -99,7 +102,6 @@ env -i PATH=/usr/bin:/bin HOME="$WORK/home" XDG_DATA_HOME="$WORK/data" \
     XDG_CONFIG_HOME="$WORK/config" XDG_CACHE_HOME="$WORK/cache" XDG_RUNTIME_DIR="$RT" \
     GSETTINGS_BACKEND=keyfile LANG=C.UTF-8 \
     timeout 40 dbus-run-session -- "$WORK/run.sh" >/dev/null 2>&1 || true
-rmdir "$RT" 2>/dev/null || true
 
 echo "GetState calls:"; cat "$OUT/calls.txt" 2>/dev/null || echo "  (none)"
 echo; cat "$OUT/tree.txt" 2>/dev/null || { echo "no tree dumped; see $OUT/shell.log"; exit 1; }

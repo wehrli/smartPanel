@@ -65,7 +65,8 @@ export function readJson(path) {
     return JSON.parse(readText(path));
 }
 
-export async function run() {
+// `after` runs once every test is done, before exit (e.g. removing a temp dir).
+export async function run({after} = {}) {
     let failed = 0;
     for (const {name, fn} of tests) {
         try {
@@ -78,5 +79,12 @@ export async function run() {
         }
     }
     print(`${tests.length - failed}/${tests.length} passed`);
+    if (after) {
+        try {
+            after();
+        } catch (e) {
+            print(`warning: cleanup failed: ${e.message}`);
+        }
+    }
     System.exit(failed ? 1 : 0);
 }
