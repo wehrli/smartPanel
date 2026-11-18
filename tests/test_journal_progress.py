@@ -157,27 +157,6 @@ def test_progress_callback_errors_do_not_stop_the_close(monkeypatch, tmp_path):
     assert order == ["close"] and r.outcome == "journaled"
 
 
-def test_async_reports_a_result_even_when_journaling_blows_up(monkeypatch, tmp_path):
-    monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
-    monkeypatch.setattr(journal, "find_transcript", lambda _c: Path("/t/sid.jsonl"))
-
-    def boom(*_a, **_k):
-        raise RuntimeError("tmux exploded")
-
-    monkeypatch.setattr(journal, "journal_in_session", boom)
-    closed, results, paths = [], [], []
-    done = threading.Event()
-    journal.write_journal_async(
-        "webapp", "/p", session_name="claude-webapp",
-        close_session=lambda: closed.append(1),
-        on_done=paths.append,
-        on_result=lambda r: (results.append(r), done.set()))
-    assert done.wait(5)
-    assert closed == [1]
-    assert results[0].outcome == "skill_failed" and results[0].path is None
-    assert paths == [None]
-
-
 # ── two sessions in one folder (SP-1602) ──
 
 _IDLE = {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}

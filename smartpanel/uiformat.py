@@ -9,24 +9,6 @@ from __future__ import annotations
 
 import time
 
-# Emoji + display name per metric category (section headers of the v1 menu and
-# window; kept for themes and tests that still name them).
-SECTION_HEADERS: dict[str, str] = {
-    "CLAUDE": "💰  Claude · today",
-    "CPU": "🖥   CPU",
-    "MEMORY": "🧠  Memory",
-    "SWAP": "🔃  Swap",
-    "DISK": "💾  Disk",
-    "NET": "🌐  Network",
-    "GPU": "🎮  GPU",
-    "BATTERY": "🔋  Battery",
-    "SESSIONS": "🧩  Sessions",
-}
-
-# Metrics whose value is a " · "-joined string expanding into multiple rows.
-MULTI_ROW_METRICS = {"PER_PROJECT", "BY_MODEL", "PRAISE_SUMMARY", "TOP_PRAISE"}
-
-
 # Longest conversation title shown before it is cut with "…".
 SESSION_TITLE_MAX_CHARS = 44
 

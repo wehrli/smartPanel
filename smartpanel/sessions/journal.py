@@ -16,8 +16,8 @@ one file per session, named `<session-id>.jsonl`. On close we do two things:
    (or why it was skipped). No prose summary is generated here; the narrative
    is the skill's job.
 
-Both steps are slow, so callers use `write_journal_async`, which runs on a
-daemon thread off the GLib main loop.
+Both steps are slow: `run_journal` blocks for minutes, so the controller
+(`services/controller.py`) runs it on a worker thread off the GLib main loop.
 """
 from __future__ import annotations
 
@@ -769,56 +769,3 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
         log.warning("failed to write journal %s: %s", path, e)
         path = None
     return JournalResult(outcome, path, confirmation, headless)
-
-
-def write_journal(project: str, cwd: str | os.PathLike | None,
-                  duration_s: float | None = None, run_skill: bool = True,
-                  session_name: str | None = None,
-                  close_session: Callable[[], None] | None = None, *,
-                  title: str = "", on_progress: Progress | None = None) -> Path | None:
-    """`run_journal`, returning just the receipt's path (the original API)."""
-    return run_journal(project, cwd, duration_s, run_skill, session_name,
-                       close_session, title=title, on_progress=on_progress).path
-
-
-def write_journal_async(project: str, cwd: str | os.PathLike | None,
-                        duration_s: float | None = None, run_skill: bool = True,
-                        session_name: str | None = None,
-                        close_session: Callable[[], None] | None = None,
-                        on_done: Callable[[Path | None], None] | None = None, *,
-                        title: str = "", on_progress: Progress | None = None,
-                        on_result: Callable[[JournalResult], None] | None = None,
-                        journal_dir: Path | None = None) -> threading.Thread:
-    """Generate the journal on a daemon thread (the skill run is slow).
-
-    Callbacks run on that thread: GTK callers bounce them with GLib.idle_add.
-    `on_done(path)` is the original API; `on_result(JournalResult)` carries the
-    outcome and confirmation line as well. Both fire exactly once, even when
-    journaling blew up (then as `skill_failed` with no receipt path).
-    """
-    once = _once(close_session)
-
-    def run() -> None:
-        result = JournalResult(OUTCOME_SKILL_FAILED, None, FAILED_CONFIRMATION)
-        try:
-            result = run_journal(project, cwd, duration_s, run_skill, session_name,
-                                 once, title=title, on_progress=on_progress,
-                                 journal_dir=journal_dir)
-        except Exception as e:  # noqa: BLE001 — never let the worker thread die loudly
-            log.warning("journal generation failed for %s: %s", project, e)
-        finally:
-            # run_journal normally owns the close; if it raised before getting
-            # there the session would be stranded, so backstop it here. `_once`
-            # makes the second call a no-op.
-            once()
-        for cb, arg in ((on_done, result.path), (on_result, result)):
-            if cb is None:
-                continue
-            try:
-                cb(arg)
-            except Exception as e:  # noqa: BLE001
-                log.warning("journal callback failed for %s: %s", project, e)
-
-    t = threading.Thread(target=run, name="smartpanel-journal", daemon=True)
-    t.start()
-    return t

@@ -98,25 +98,6 @@ def test_list_sessions_empty_when_no_server():
     assert tmux.list_sessions(run=run) == []
 
 
-def test_kill_all_only_kills_prefixed_sessions():
-    out = "\n".join([
-        _line("claude-a", created=1),
-        _line("work", created=2),             # must NOT be killed
-        _line("claude-b", created=3),
-    ])
-    run = _fake_runner(out)
-    killed = tmux.kill_all(run=run)
-    assert killed == 2
-    kill_targets = [a[2] for a in run.calls if a[:1] == ["kill-session"]]  # type: ignore[attr-defined]
-    assert kill_targets == ["=claude-b", "=claude-a"]  # newest-first order
-
-
-def test_kill_all_counts_only_successful_kills():
-    out = "\n".join([_line("claude-a"), _line("claude-b")])
-    run = _fake_runner(out, kill_ok=False)
-    assert tmux.kill_all(run=run) == 0
-
-
 def test_kill_session_targets_exact_name():
     run = _fake_runner("")
     assert tmux.kill_session("claude-x", run=run) is True

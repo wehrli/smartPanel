@@ -35,7 +35,6 @@ the bottom, and older output is exactly what produces false positives.
 """
 from __future__ import annotations
 
-import dataclasses
 import re
 from typing import Iterable, Sequence
 
@@ -160,17 +159,6 @@ def _is_user_text(lines: Sequence[str], cursor_at: int) -> bool:
 def activity_of(name: str, run: Runner = _run) -> str:
     """Current state of one session. Never raises; UNKNOWN if tmux says nothing."""
     return classify_pane(capture_pane(name, run=run))
-
-
-def annotate(sessions: Iterable[TmuxSession], run: Runner = _run) -> list[TmuxSession]:
-    """Return copies of `sessions` with `.activity` filled in.
-
-    Kept out of `list_sessions` on purpose: listing is one cheap tmux call that
-    several callers make, while this is one call *per session*. Callers that
-    want the states ask for them.
-    """
-    return [dataclasses.replace(s, activity=activity_of(s.name, run=run))
-            for s in sessions]
 
 
 def counts(sessions: Iterable[TmuxSession]) -> dict[str, int]:

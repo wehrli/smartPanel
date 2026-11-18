@@ -10,6 +10,11 @@ from smartpanel.sessions import journal
 
 # ---- transcript discovery ----
 
+
+def _receipt(*a, **k):
+    """`run_journal`'s receipt path, for tests about the receipt itself."""
+    return journal.run_journal(*a, **k).path
+
 def test_project_dir_dash_encodes_the_cwd():
     d = journal.project_dir_for_cwd("/home/user/projects/smartPanel")
     assert d.name == "-home-user-projects-smartPanel"
@@ -178,9 +183,9 @@ def test_render_says_so_when_the_skill_did_not_run():
     assert "_(No transcript found for this folder.)_" in md
 
 
-def test_write_journal_writes_a_receipt_even_without_a_transcript(tmp_path, monkeypatch):
+def test_run_journal_writes_a_receipt_even_without_a_transcript(tmp_path, monkeypatch):
     monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
-    p = journal.write_journal("webapp", None, duration_s=60, run_skill=False)
+    p = _receipt("webapp", None, duration_s=60, run_skill=False)
     assert p is not None and p.exists()
     text = p.read_text()
     assert text.startswith("---\n")
@@ -189,7 +194,7 @@ def test_write_journal_writes_a_receipt_even_without_a_transcript(tmp_path, monk
     assert body.startswith("# Session journal — webapp")
 
 
-def test_write_journal_runs_the_skill_with_the_sessions_id(tmp_path, monkeypatch):
+def test_run_journal_runs_the_skill_with_the_sessions_id(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
     monkeypatch.setattr(journal, "find_transcript", lambda _c: Path("/t/sid-1.jsonl"))
@@ -197,7 +202,7 @@ def test_write_journal_runs_the_skill_with_the_sessions_id(tmp_path, monkeypatch
     monkeypatch.setattr(journal, "run_journal_skill",
                         lambda sid, cwd, proj: calls.append((sid, cwd, proj)) or "done.")
 
-    p = journal.write_journal("webapp", "/home/user/projects/webapp")
+    p = _receipt("webapp", "/home/user/projects/webapp")
 
     assert calls == [("sid-1", "/home/user/projects/webapp", "webapp")]
     assert "done." in p.read_text()
@@ -383,9 +388,9 @@ def test_journal_in_session_timeout_is_not_retryable(tmp_path, monkeypatch):
     assert not r.retryable
 
 
-# ---- write_journal: ordering of journal vs. close ----
+# ---- run_journal: ordering of journal vs. close ----
 
-def test_write_journal_closes_the_session_only_after_the_live_run(tmp_path, monkeypatch):
+def test_run_journal_closes_the_session_only_after_the_live_run(tmp_path, monkeypatch):
     """The whole point of the live path: the session stays up until it answers."""
     order: list[str] = []
     monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
@@ -397,14 +402,14 @@ def test_write_journal_closes_the_session_only_after_the_live_run(tmp_path, monk
     monkeypatch.setattr(journal, "run_journal_skill",
                         lambda *a: order.append("resume") or "should not happen")
 
-    p = journal.write_journal("webapp", "/p", session_name="claude-webapp",
+    p = _receipt("webapp", "/p", session_name="claude-webapp",
                               close_session=lambda: order.append("close"))
 
     assert order == ["journal", "close"]  # journal first, close second
     assert "Appended § webapp." in p.read_text()
 
 
-def test_write_journal_falls_back_to_resume_and_closes_first(tmp_path, monkeypatch):
+def test_run_journal_falls_back_to_resume_and_closes_first(tmp_path, monkeypatch):
     """--resume reuses the session id, so the session must be dead before it runs."""
     order: list[str] = []
     monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
@@ -415,14 +420,14 @@ def test_write_journal_falls_back_to_resume_and_closes_first(tmp_path, monkeypat
     monkeypatch.setattr(journal, "run_journal_skill",
                         lambda *a: order.append("resume") or "Appended via resume.")
 
-    p = journal.write_journal("webapp", "/p", session_name="claude-webapp",
+    p = _receipt("webapp", "/p", session_name="claude-webapp",
                               close_session=lambda: order.append("close"))
 
     assert order == ["close", "resume"]  # close first, then resume
     assert "Appended via resume." in p.read_text()
 
 
-def test_write_journal_does_not_double_run_after_a_live_timeout(tmp_path, monkeypatch):
+def test_run_journal_does_not_double_run_after_a_live_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
     monkeypatch.setattr(journal, "find_transcript", lambda _c: Path("/t/sid-1.jsonl"))
     monkeypatch.setattr(journal, "condense", lambda _t: journal.Digest())
@@ -431,31 +436,11 @@ def test_write_journal_does_not_double_run_after_a_live_timeout(tmp_path, monkey
     calls: list = []
     monkeypatch.setattr(journal, "run_journal_skill", lambda *a: calls.append(a) or "x")
 
-    p = journal.write_journal("webapp", "/p", session_name="claude-webapp",
+    p = _receipt("webapp", "/p", session_name="claude-webapp",
                               close_session=lambda: None)
 
     assert calls == []  # never retried
     assert "had not finished" in p.read_text()
-
-
-def test_write_journal_closes_the_session_even_if_journaling_blows_up(tmp_path, monkeypatch):
-    """A wedged journal must never leave a session that cannot be closed."""
-    closed: list = []
-    monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
-    monkeypatch.setattr(journal, "find_transcript", lambda _c: Path("/t/sid-1.jsonl"))
-    monkeypatch.setattr(journal, "condense", lambda _t: journal.Digest())
-
-    def boom(*_a, **_kw):
-        raise RuntimeError("tmux exploded")
-
-    monkeypatch.setattr(journal, "journal_in_session", boom)
-
-    done = threading.Event()
-    journal.write_journal_async("webapp", "/p", session_name="claude-webapp",
-                                close_session=lambda: closed.append(True),
-                                on_done=lambda _p: done.set())
-    assert done.wait(5)
-    assert closed == [True]  # exactly once
 
 
 def test_once_runs_the_callback_a_single_time():

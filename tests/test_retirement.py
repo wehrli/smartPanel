@@ -85,3 +85,26 @@ def test_praise_report_needs_no_display_and_no_gtk(tmp_path):
                          capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip(), "report printed nothing"
+
+
+# v1/GTK3-era helpers with no v2 caller. `launch.default_dir` in particular
+# duplicated the `sessions.dir` setting with a different default (~/dev).
+RETIRED_SYMBOLS = (
+    ("smartpanel.sessions.launch", "launch_session"),
+    ("smartpanel.sessions.launch", "terminal_available"),
+    ("smartpanel.sessions.launch", "default_dir"),
+    ("smartpanel.sessions.tmux", "kill_all"),
+    ("smartpanel.sessions.activity", "annotate"),
+    ("smartpanel.sessions.journal", "write_journal"),
+    ("smartpanel.sessions.journal", "write_journal_async"),
+    ("smartpanel.uiformat", "SECTION_HEADERS"),
+    ("smartpanel.uiformat", "MULTI_ROW_METRICS"),
+)
+
+
+@pytest.mark.parametrize("module,name", RETIRED_SYMBOLS)
+def test_retired_symbol_is_gone(module, name):
+    import importlib
+
+    assert not hasattr(importlib.import_module(module), name)
+    assert not hasattr(importlib.import_module("smartpanel.sessions"), name)

@@ -30,23 +30,6 @@ def launcher_script() -> Path:
     return Path(__file__).resolve().parent.parent.parent / "scripts" / "claude-tmux"
 
 
-def terminal_available(term: str = DEFAULT_TERMINAL) -> bool:
-    return shutil.which(term) is not None
-
-
-def default_dir() -> Path:
-    """Starting folder for the new-session picker.
-
-    Honors `SMARTPANEL_SESSIONS_DIR`; otherwise defaults to `~/dev` if present,
-    else the home directory.
-    """
-    override = os.environ.get("SMARTPANEL_SESSIONS_DIR")
-    if override and Path(override).is_dir():
-        return Path(override)
-    dev = Path.home() / "dev"
-    return dev if dev.is_dir() else Path.home()
-
-
 def terminal_argv(term: str = DEFAULT_TERMINAL, inner: str = "",
                   workdir: str | None = None,
                   which: Callable[[str], str | None] | None = None) -> list[str] | None:
@@ -132,9 +115,3 @@ def launch(cwd: str | os.PathLike | None = None, term: str = DEFAULT_TERMINAL, *
         return LaunchResult(FAILED, str(e), workdir)
     log.info("launched %s session in %s", term, workdir)
     return LaunchResult(STARTED, "", workdir)
-
-
-def launch_session(cwd: str | os.PathLike | None = None,
-                   term: str = DEFAULT_TERMINAL) -> bool:
-    """Bool wrapper over `launch` for the GTK3 dashboard (retired in v2)."""
-    return launch(cwd, term).ok

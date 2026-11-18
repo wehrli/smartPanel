@@ -194,15 +194,6 @@ def test_activity_of_degrades_when_tmux_fails():
     assert activity.activity_of("gone", run=lambda a: (1, "", "no such")) == UNKNOWN
 
 
-def test_annotate_fills_the_field_without_touching_the_rest():
-    sessions = [TmuxSession("claude-a", created=7, attached=True, windows=2,
-                            title="Fix login")]
-    [out] = activity.annotate(sessions, run=lambda a: (0, RUNNING_PANE, ""))
-    assert out.activity == RUNNING
-    assert (out.name, out.created, out.attached, out.windows, out.title) == (
-        "claude-a", 7, True, 2, "Fix login")
-
-
 def test_counts_tallies_every_state():
     def s(name, state):
         return TmuxSession(name, 0, False, 1, activity=state)

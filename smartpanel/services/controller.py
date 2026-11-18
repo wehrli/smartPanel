@@ -347,9 +347,9 @@ class Controller:
         """Worker thread: journal each session in turn, then close it.
 
         Sequential on purpose — the skill appends to one shared monthly log, and
-        `_SKILL_LOCK` would serialize the runs anyway. Every guarantee of
-        `journal.write_journal_async` holds here too: `_once` around the kill,
-        and a `finally` backstop so a session is never stranded un-closable.
+        `_SKILL_LOCK` would serialize the runs anyway. `_once` around the kill
+        and a `finally` backstop mean a session is never stranded un-closable,
+        even when `run_journal` raises.
         """
         failures = 0
         for s, cwd in queue:
