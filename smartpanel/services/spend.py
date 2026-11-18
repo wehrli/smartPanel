@@ -5,6 +5,8 @@ API (fixed by the v2 contract):
     SpendService.session_cost(transcript_path) -> float | None   # cached per-file cost (E14)
 
 How it runs (SP-0801):
+- The scan itself runs in a child process (`claude_stats.scan_worker`, SP-2702);
+  the worker thread just waits on its pipe with the GIL released.
 - Every `INTERVAL_S` (15 s) a main-loop tick starts `Aggregator.refresh()` on a worker
   thread. Only one refresh is ever in flight; a tick that finds one running is skipped.
   `refresh_now()` while busy queues exactly one follow-up run instead.
@@ -37,6 +39,7 @@ from typing import Any, Callable
 from smartpanel.claude_stats.aggregator import Aggregator, Snapshot
 from smartpanel.claude_stats.budget import BudgetAlerts, budget_message
 from smartpanel.claude_stats.forecast import forecast
+from smartpanel.claude_stats.scan_worker import ScanWorker
 from smartpanel.claude_stats.spend_state import build_spend_state, days
 from smartpanel.state.model import Event, Loading
 
@@ -168,7 +171,9 @@ class SpendService:
                  monotonic: Callable[[], float] = time.monotonic):
         self.store, self.config = store, config
         self.claude_root = Path(claude_root) if claude_root else None
-        self._agg = aggregator or Aggregator(claude_root=self.claude_root)
+        # The default scans in a child process (SP-2702): a cold scan on a
+        # thread here would hold the GIL for seconds and stall the main loop.
+        self._agg = aggregator or ScanWorker(claude_root=self.claude_root)
         self._sched = scheduler
         self._notify = notifier or default_notifier
         self._interval = interval_s
@@ -196,6 +201,9 @@ class SpendService:
         if self._running:
             return
         self._running = True
+        reopen = getattr(self._agg, "open", None)
+        if callable(reopen):
+            reopen()
         sched = self._scheduler()
         self._timer = sched.timeout_add_seconds(self._interval, self._on_timer)
         subscribe = getattr(self.config, "subscribe", None)
@@ -211,6 +219,12 @@ class SpendService:
         if self._unsub_config is not None:
             self._unsub_config()
             self._unsub_config = None
+        close = getattr(self._agg, "close", None)
+        if callable(close):
+            try:
+                close()       # ends the scan process; a refresh in flight fails
+            except Exception:  # noqa: BLE001
+                log.debug("closing the scan worker failed", exc_info=True)
 
     def refresh_now(self) -> None:
         if self._busy:

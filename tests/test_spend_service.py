@@ -485,3 +485,39 @@ def test_progress_hand_offs_are_capped_at_four_a_second(tmp_path):
     assert 8 <= len(seen) <= 10          # ~2 s / 0.25 s, plus the final file
     assert seen[0] == Loading(1, 1000)   # the first one is never held back
     assert seen[-1] == Loading(1000, 1000)
+
+
+# ── SP-2702: the default scan runs in a child process ──
+
+def test_default_aggregator_is_the_out_of_process_scan_worker(tmp_path):
+    from smartpanel.claude_stats.scan_worker import ScanWorker
+    svc = SpendService(Store(), Config({}), tmp_path / "projects",
+                       scheduler=FakeScheduler(), notifier=lambda *a: None)
+    assert isinstance(svc._agg, ScanWorker)
+    assert svc._agg.root == tmp_path / "projects"
+
+
+def test_stop_closes_the_scan_worker_and_start_reopens_it(tmp_path):
+    calls = []
+
+    class FakeWorker:
+        root = tmp_path
+
+        def refresh(self, progress=None):
+            from smartpanel.claude_stats.aggregator import Snapshot
+            return Snapshot()
+
+        def open(self):
+            calls.append("open")
+
+        def close(self):
+            calls.append("close")
+
+    sched = FakeScheduler()
+    svc = SpendService(Store(), Config({}), tmp_path, scheduler=sched,
+                       aggregator=FakeWorker(), notifier=lambda *a: None)
+    svc.start()
+    sched.settle()
+    svc.stop()
+    svc.start()
+    assert calls == ["open", "close", "open"]
