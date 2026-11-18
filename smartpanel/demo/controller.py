@@ -138,6 +138,7 @@ class DemoController:
         if config is not None:
             if not persist and hasattr(config, "path"):
                 config.path = None
+                self._seed_budget()
             if hasattr(config, "bind_store"):
                 self._unsub.append(config.bind_store(store))
             self._unsub.append(config.subscribe(self._on_setting))
@@ -147,6 +148,20 @@ class DemoController:
                 self._apply_budget()
         if autostart:
             self.start()
+
+    def _seed_budget(self) -> None:
+        """Show the scenario's budget in Settings too (SP-0905).
+
+        The scenarios carry the prototype's $40 budget, so Overview reads
+        "$23.84 / $40.00"; with `budget.daily_usd` unset, Settings said "Off" at
+        the same time. Only on a detached config: `set` never writes the file.
+        """
+        if self._budget is None or self._cfg("budget.daily_usd", None) is not None:
+            return
+        try:
+            self.config.set("budget.daily_usd", self._budget)
+        except Exception:  # noqa: BLE001 — env-owned or invalid: leave Settings as is
+            log.debug("could not seed the demo budget into settings", exc_info=True)
 
     # ───────────────────────── lifecycle ─────────────────────────
     def start(self) -> None:

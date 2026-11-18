@@ -401,6 +401,17 @@ def test_budget_follows_config():
     assert store.state.spend.forecast.budget_usd == 100
 
 
+def test_settings_show_the_demo_budget():
+    """Overview says "$23.84 / $40.00"; Settings must not say "Off" beside it."""
+    cfg = Config()
+    store, ctl, *_ = demo_controller(config=cfg)
+    assert cfg.get("budget.daily_usd") == 40
+    assert store.state.settings.values["budget.daily_usd"] == 40
+    assert cfg.path is None                                # never written to disk
+    store, ctl, *_ = demo_controller("cold", config=Config())
+    assert store.state.settings.values["budget.daily_usd"] == 40
+
+
 def test_recheck_environment():
     store, ctl, sched, rec = demo_controller("notmux")
     ctl.recheck_environment()
