@@ -179,10 +179,23 @@ def test_session_row_sub_line():
 def test_session_row_journaling_and_starting():
     j = _session(phase=PHASE_JOURNALING, journal=JournalProgress(step=2))
     row = m.session_row(j, NOW, "~/dev/omdev/JOURNAL/2026-11.md")
-    assert row.right == "⏳ Skill appends to JOURNAL/2026-11.md…"
-    assert row.busy and row.journaling and "$" not in row.sub
+    # the step goes in the wide sub-line; the right slot is a short counter
+    assert row.sub == "Skill appends to JOURNAL/2026-11.md…"
+    assert row.right == "⏳ 3/5"
+    assert row.busy and row.journaling and not row.failed and "$" not in row.sub
     launch = m.session_row(_session(phase=PHASE_LAUNCHING), NOW)
     assert launch.right == "starting…" and launch.busy and launch.state == PHASE_LAUNCHING
+
+
+def test_session_row_failed_journal_reads_as_failed():
+    j = _session(phase=PHASE_JOURNALING, journal=JournalProgress(step=2, failed=True))
+    row = m.session_row(j, NOW, "~/dev/omdev/JOURNAL/2026-11.md")
+    assert row.failed and row.busy
+    assert row.sub == "✕ Skill appends to JOURNAL/2026-11.md · failed, closing anyway"
+    assert row.right == "✕ 3/5"
+    running = m.session_row(_session(phase=PHASE_JOURNALING,
+                                     journal=JournalProgress(step=2)), NOW)
+    assert running.sub != row.sub and running.right != row.right
 
 
 def test_needs_rows():
@@ -317,7 +330,19 @@ def test_overview_journaling_row_disables_controls():
     store.mutate("sessions", journaling)
     row = page._rows[name]
     assert not row.close_button.get_sensitive() and not row.retitle_button.get_sensitive()
-    assert row.right.get_text() == "⏳ Wait for the session to go idle…"
+    assert row.sub.get_text() == "Wait for the session to go idle…"
+    assert row.sub.get_tooltip_text() == "Wait for the session to go idle…"
+    assert row.right.get_text() == "⏳ 1/5"
+    assert row.sub.has_css_class("os-jt") and not row.sub.has_css_class("os-jfail")
+
+    def failed(s):
+        for x in s.items:
+            if x.name == name:
+                x.journal = JournalProgress(step=2, failed=True)
+    store.mutate("sessions", failed)
+    assert row.sub.get_text().endswith("· failed, closing anyway")
+    assert row.sub.has_css_class("os-jfail") and not row.sub.has_css_class("os-jt")
+    assert row.right.get_text().startswith("✕")
 
 
 @needs_display

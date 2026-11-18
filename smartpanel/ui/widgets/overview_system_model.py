@@ -309,33 +309,44 @@ def display_state(s: Session) -> str:
 class SessionRow:
     state: str
     title: str
-    sub: str               # "project · ● attached · $2.90"
-    right: str             # age, "starting…", or "⏳ <journal step>…"
+    sub: str               # "project · ● attached · $2.90", or the journal step
+    right: str             # age, "starting…", or "⏳ 3/5" while journaling
     journaling: bool
     busy: bool             # journaling or launching: ⟳ / ✕ / focus disabled
+    failed: bool = False   # the journal skill failed; the session closes anyway
 
 
 def session_row(s: Session, now: float, monthly_log: str | None = None) -> SessionRow:
+    """A journaling row puts the step text in the (wide) sub-line and only a
+    short '⏳ 3/5' in the right slot, so the title keeps its room (SP-1605)."""
+    from smartpanel.state.model import JOURNAL_STEPS
     from smartpanel.uiformat import journal_step_text
     state = display_state(s)
     journaling = state == PHASE_JOURNALING
     launching = state == PHASE_LAUNCHING
+    failed = False
+    if journaling:
+        j = s.journal
+        index = max(0, min(j.step if j else 0, len(JOURNAL_STEPS) - 1))
+        step = journal_step_text(index, s.project or s.name,
+                                 headless=bool(j and j.headless), monthly_log=monthly_log)
+        failed = bool(j and j.failed)
+        progress = f"{index + 1}/{len(JOURNAL_STEPS)}"
+        if failed:
+            sub, right = f"✕ {step} · failed, closing anyway", f"✕ {progress}"
+        else:
+            sub, right = f"{step}…", f"⏳ {progress}"
+        return SessionRow(state, s.display_title, sub, right, True, True, failed)
     parts = [s.project or s.name]
     if s.attached:
         parts.append("● attached")
-    if not journaling and s.cost_usd is not None:          # SP-1403: hidden when unknown
+    if s.cost_usd is not None:                             # SP-1403: hidden when unknown
         parts.append(money(s.cost_usd))
-    if journaling:
-        j = s.journal
-        step = journal_step_text(j.step if j else 0, s.project or s.name,
-                                 headless=bool(j and j.headless), monthly_log=monthly_log)
-        right = f"⏳ {step}…"
-    elif launching:
+    if launching:
         right = "starting…"
     else:
         right = fmt_age(now - s.created) if s.created else ""
-    return SessionRow(state, s.display_title, " · ".join(parts), right, journaling,
-                      journaling or launching)
+    return SessionRow(state, s.display_title, " · ".join(parts), right, False, launching)
 
 
 @dataclass(frozen=True)
