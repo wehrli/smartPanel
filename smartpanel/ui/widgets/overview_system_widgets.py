@@ -56,6 +56,7 @@ button.os-stitle:disabled .os-title { color: var(--sp-fg); }
 .os-sub { font-size: 0.88em; color: var(--sp-muted); font-weight: normal; }
 .os-age { font-size: 0.9em; color: var(--sp-muted); font-feature-settings: "tnum"; }
 .os-jt { font-size: 0.88em; color: var(--sp-jour); }
+.os-jfail { font-size: 0.88em; color: var(--sp-crit); }
 button.os-ib { min-width: 24px; min-height: 24px; padding: 0; color: var(--sp-muted); }
 
 /* budget + projects */
@@ -151,10 +152,9 @@ def _spinner() -> Gtk.Widget:
 
 
 class SessionRow(Gtk.ListBoxRow):
-    """glyph · title button (title, sub-line) · age | journal step · ⟳ · ✕"""
+    """glyph · title button (title, sub-line | journal step) · age | ⏳ n/5 · ⟳ · ✕"""
 
     RETITLE_MIN_MS = 500
-    JOURNAL_FLOOR_CHARS = 24
     RETITLE_MAX_MS = 3000
 
     def __init__(self, name: str, *, on_focus: Callable[[str], None],
@@ -217,17 +217,15 @@ class SessionRow(Gtk.ListBoxRow):
         set_text(self.title, row.title)
         set_text(self.sub, row.sub)
         set_text(self.right, row.right)
-        toggle_class(self.right, "os-jt", row.journaling)
-        toggle_class(self.right, "os-age", not row.journaling)
-        self.right.set_tooltip_text(row.right if row.journaling else None)
-        # an ellipsizing label's minimum is its width_chars and its natural
-        # width the full text: the title (ellipsize END) gives way first, down
-        # to its own floor; below JOURNAL_FLOOR_CHARS the step ellipsizes in
-        # the MIDDLE so the "…/2026-11.md…" tail stays readable
-        self.right.set_width_chars(min(len(row.right), self.JOURNAL_FLOOR_CHARS)
-                                   if row.journaling else -1)
-        self.right.set_ellipsize(Pango.EllipsizeMode.MIDDLE if row.journaling
-                                 else Pango.EllipsizeMode.END)
+        # While journaling the sub-line carries the step (ellipsized at the end,
+        # whole in the tooltip) and the right slot only '⏳ 3/5', so the title
+        # never gets squeezed by a long step (SP-1605).
+        toggle_class(self.sub, "os-jt", row.journaling and not row.failed)
+        toggle_class(self.sub, "os-jfail", row.failed)
+        self.sub.set_tooltip_text(row.sub if row.journaling else None)
+        self.right.set_tooltip_text(row.sub if row.journaling else None)
+        toggle_class(self.right, "os-jt", row.journaling and not row.failed)
+        toggle_class(self.right, "os-jfail", row.failed)
         for b in (self.title_button, self.retitle_button, self.close_button):
             if b.get_sensitive() == row.busy:
                 b.set_sensitive(not row.busy)

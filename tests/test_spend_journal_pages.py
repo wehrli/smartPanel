@@ -6,7 +6,7 @@ gi = pytest.importorskip("gi")
 try:
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
-    from gi.repository import Adw, Gdk, Gtk
+    from gi.repository import Adw, Gdk, Gtk, Pango
     _DISPLAY = Gtk.init_check() if hasattr(Gtk, "init_check") else True
     _DISPLAY = _DISPLAY and Gdk.Display.get_default() is not None
 except (ImportError, ValueError):  # pragma: no cover
@@ -132,6 +132,79 @@ def test_spend_route_during_loading_applies_when_loaded():
     assert page.selected_date == target
 
 
+class OlderDaysActions(RecordingActions):
+    """spend_days backed by the same model the service uses (zeros past the data)."""
+
+    def spend_days(self, count, end):
+        from datetime import timedelta
+        from smartpanel.state.model import DaySpend
+        self.calls.append(("spend_days", (count, end)))
+        return [DaySpend(date=(end - timedelta(days=i)).isoformat(),
+                         label=(end - timedelta(days=i)).strftime("%a %-d %b"),
+                         cost_usd=float(i + 1)) for i in range(count)]
+
+
+def test_spend_shows_older_days_on_demand():
+    # SP-1001: the store carries 14 days; older ones are asked for on demand.
+    from smartpanel.ui.pages import spend
+    store = Store(build_state("busy"))
+    actions = OlderDaysActions()
+    page = spend.build(store, actions, FakeConfig())
+    store_days = store.state.spend.days
+    assert len(page._rows) == 14 and page.older_button.get_visible()
+    assert not [c for c in actions.calls if c[0] == "spend_days"]   # nothing until asked
+    page.older_button.emit("clicked")
+    assert len(page._rows) == 28
+    (count, end), = [c[1] for c in actions.calls if c[0] == "spend_days"]
+    assert count == 14 and end.isoformat() < store_days[-1].date
+    assert page._rows[14].row.date == end.isoformat()
+    # an older day can be picked and shows its receipt
+    page.days.select_row(page._rows[20])
+    assert page.selected_date == page._rows[20].row.date
+    assert page.receipt.model.total == f"{7.0:.2f}"
+    # a tick doesn't re-fetch or drop the older rows, and keeps the pick
+    store.update("spend", cost_today=store.state.spend.cost_today)
+    store.update("app", loading=None)
+    assert len(page._rows) == 28 and page.selected_date == page._rows[20].row.date
+    assert len([c for c in actions.calls if c[0] == "spend_days"]) == 1
+    # up to the 90 days the aggregator keeps, then the button goes away
+    for _ in range(10):
+        if page.older_button.get_visible():
+            page.older_button.emit("clicked")
+    assert len(page._rows) == spend.DAYS_KEPT and not page.older_button.get_visible()
+
+
+def test_spend_older_days_follow_midnight():
+    import dataclasses
+    from smartpanel.ui.pages import spend
+    store = Store(build_state("busy"))
+    page = spend.build(store, OlderDaysActions(), FakeConfig())
+    from datetime import date, timedelta
+    page.show_older_days()
+    old = list(store.state.spend.days)
+    tomorrow = (date.fromisoformat(old[0].date) + timedelta(days=1)).isoformat()
+    new_today = dataclasses.replace(old[0], date=tomorrow, label="Today")
+    store.update("spend", days=[new_today] + old[:13])
+    dates = [r.row.date for r in page._rows]
+    assert len(dates) == 28 and len(set(dates)) == 28        # no gap, no duplicate
+    assert dates == sorted(dates, reverse=True)
+
+
+def test_spend_older_days_hidden_without_support():
+    from smartpanel.ui.pages import spend
+
+    class NoOlder:
+        def request_new_session(self):
+            pass
+    store = Store(build_state("busy"))
+    page = spend.build(store, NoOlder(), FakeConfig())
+    assert not page.older_button.get_visible()
+    # an implementation that answers None (unsupported) hides it after one try
+    _mod, _store, _a, page2 = _spend()
+    page2.older_button.emit("clicked")
+    assert len(page2._rows) == 14 and not page2.older_button.get_visible()
+
+
 def test_receipt_updates_in_place_on_a_tick():
     _mod, store, _a, page = _spend()
     rebuilds = page.receipt.rebuilds
@@ -186,6 +259,23 @@ def test_journal_lists_entries_and_selects_first():
     assert page._rows[0].badge.get_text() == "✓ JOURNALED"
     assert page.detail.dd["Duration"].get_text() == "2h30m"
     assert page.detail.open_log.get_child().get_text().startswith("Open JOURNAL/")
+
+
+def test_journal_open_buttons_wrap_instead_of_cutting_the_file_name():
+    # SP-1803: at the default 900 px window the detail card is ~375 px wide;
+    # 'Open JOURNAL/2026-11.md' must wrap below 'Open receipt', not be
+    # middle-ellipsized to 'Open JOURN…2026-11.md'.
+    _mod, _store, page = _journal()
+    btns = page.detail.buttons
+    label = page.detail.open_log.get_child()
+    assert label.get_text() == "Open JOURNAL/2026-11.md"
+    assert label.get_ellipsize() != Pango.EllipsizeMode.MIDDLE
+    one_line = btns.measure(Gtk.Orientation.VERTICAL, 2000)[1]
+    narrow = btns.measure(Gtk.Orientation.VERTICAL, 300)[1]
+    assert narrow > one_line                     # wrapped onto a second line
+    # each button still gets its whole label on that second line
+    log_natural = page.detail.open_log.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
+    assert log_natural <= 300
 
 
 def test_journal_route_selects_entry_and_failed_quote():

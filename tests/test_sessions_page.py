@@ -430,9 +430,19 @@ def test_new_session_preselects_last_used_and_marks_running(shell, monkeypatch):
     assert d.get_response_enabled("open")
     labels = _labels(d.get_extra_child())
     assert "~/dev/omdev /" in labels and "●" in labels
+    assert "A session is already running there" in labels      # the ● is explained
     assert "Opens Terminator running Claude inside tmux, in" in labels
     # the path sits whole on its own unwrapped line, slashes intact
     assert any(t.startswith("/tmp/") and "\u2060" not in t for t in labels)
+    d.force_close()
+
+
+def test_new_session_legend_only_when_a_folder_has_a_session(shell):
+    from smartpanel.ui import session_dialogs as sd
+    win, store, _ = shell
+    d = sd.new_session(win, store, Rec([{"name": "a", "path": "/tmp/a"}]), Cfg())
+    labels = _labels(d.get_extra_child())
+    assert "●" not in labels and "A session is already running there" not in labels
     d.force_close()
 
 

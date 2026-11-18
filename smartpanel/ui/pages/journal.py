@@ -65,9 +65,11 @@ def _swap(widget: Gtk.Widget, old: str | None, new: str | None) -> str | None:
     return new
 
 
-def _ellipsizing(text: str) -> Gtk.Label:
-    """A button label that may shrink, so the detail card never forces width."""
-    return Gtk.Label(label=text, ellipsize=Pango.EllipsizeMode.MIDDLE, width_chars=12)
+def _button_label(text: str) -> Gtk.Label:
+    """A button label shown whole: the button row wraps instead (SP-1803). It
+    only ellipsizes, at the end, when a single button is wider than the card,
+    so the detail never forces the window wider."""
+    return Gtk.Label(label=text, ellipsize=Pango.EllipsizeMode.END, width_chars=8)
 
 
 class EntryRow(Gtk.ListBoxRow):
@@ -144,23 +146,25 @@ class Detail(Gtk.Box):
             self.dd[term] = dd
         self.append(self.dl)
 
+        # WORD_CHAR: Pango breaks after '/' and '-' first, and only splits a
+        # segment mid-word when it alone is wider than the line.
         self.path = Gtk.Label(xalign=0, wrap=True, selectable=True,
-                              wrap_mode=Pango.WrapMode.CHAR)
+                              wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.path.add_css_class("sj-path")
         attrs = Pango.AttrList()
         attrs.insert(Pango.attr_insert_hyphens_new(False))   # a path, not a word
         self.path.set_attributes(attrs)
         self.append(self.path)
 
-        # Side by side; the labels ellipsize rather than wrap the row. The page
-        # stacks them (vertical) in its narrow layout.
-        buttons = Gtk.Box(spacing=8, halign=Gtk.Align.START)
+        # Side by side when both fit, otherwise the second wraps below; the
+        # file name on 'Open JOURNAL/2026-11.md' is never cut to make room.
+        buttons = Adw.WrapBox(child_spacing=8, line_spacing=8, halign=Gtk.Align.START)
         buttons.set_margin_top(2)
         self.buttons = buttons
         buttons.add_css_class("sj-btns")
-        self.open_receipt = Gtk.Button(child=_ellipsizing("Open receipt"))
+        self.open_receipt = Gtk.Button(child=_button_label("Open receipt"))
         self.open_receipt.connect("clicked", lambda *_: self._open("receipt"))
-        self.open_log = Gtk.Button(child=_ellipsizing(""))
+        self.open_log = Gtk.Button(child=_button_label(""))
         self.open_log.connect("clicked", lambda *_: self._open("log"))
         for b in (self.open_receipt, self.open_log):
             buttons.append(b)
@@ -267,8 +271,6 @@ class JournalPage(Gtk.Stack):
         grid.remove(self.detail)
         grid.attach(self.detail, 0 if narrow else 1, 1 if narrow else 0, 1, 1)
         list_card.set_size_request(-1 if narrow else LIST_WIDTH, -1)
-        self.detail.buttons.set_orientation(
-            Gtk.Orientation.VERTICAL if narrow else Gtk.Orientation.HORIZONTAL)
         self.narrow = narrow
 
     # ── store ──

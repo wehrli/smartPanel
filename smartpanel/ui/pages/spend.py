@@ -13,11 +13,18 @@ labels are re-set only when their text changes. The day selection follows Today
 (also across midnight) until the user picks another day, which is then kept by
 date across ticks; reopening the window goes back to Today.
 
+The store carries the last 14 days; **Show older days** under the list asks
+`actions.spend_days(count, end)` for 14 more at a time (SP-1001), up to the
+DAYS_KEPT the aggregator holds. Those rows are appended below the store's and
+re-fetched only when the store's window moves (midnight) or a scan lands.
+
 API (fixed for every page): build(store, actions, config) -> Gtk.Widget
 """
 from __future__ import annotations
 
+import logging
 import math
+from datetime import date, timedelta
 
 import gi
 
@@ -25,13 +32,18 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
+from smartpanel.claude_stats.aggregator import DAYS_KEPT  # noqa: E402
 from smartpanel.ui import tokens  # noqa: E402
 from smartpanel.ui.widgets import EmptyState, Track  # noqa: E402
 from smartpanel.ui.widgets import spend_journal_css as sjcss  # noqa: E402
 from smartpanel.ui.widgets import spend_journal_model as m  # noqa: E402
 from smartpanel.ui.widgets.spend_journal_receipt import Receipt  # noqa: E402
 
+log = logging.getLogger(__name__)
+
 DAY_LIST_WIDTH = 200
+OLDER_STEP = 14         # days fetched per 'Show older days'
+OLDER_LABEL = "Show older days"
 STACK_BELOW = 560       # px of the day-list + receipt area
 HEAD_TWO_BELOW = 640    # px: below this the header cards go 2+2, never 3+1
 NARROW_MIN = 280
@@ -153,6 +165,11 @@ class SpendPage(Gtk.Stack):
         self._pending_date: str | None = None    # a route that arrived early
         self._syncing = False
         self._rows: list[DayRowWidget] = []
+        # Older days fetched on demand, below the store's 14 (SP-1001).
+        self._older_count = 0
+        self._older: list = []
+        self._older_key: tuple | None = None
+        self._older_exhausted = False
 
         self._build_loading()
         self._build_first_run()
@@ -246,6 +263,12 @@ class SpendPage(Gtk.Stack):
         _a11y(self.days, "Days")
         self.days.connect("row-selected", self._on_row_selected)
         days_card.append(self.days)
+        self.older_button = Gtk.Button(label=OLDER_LABEL, halign=Gtk.Align.CENTER)
+        self.older_button.add_css_class("flat")
+        self.older_button.set_margin_bottom(6)
+        self.older_button.set_tooltip_text(f"Spend is kept for the last {DAYS_KEPT} days")
+        self.older_button.connect("clicked", lambda *_: self.show_older_days())
+        days_card.append(self.older_button)
         recv.append(days_card)
 
         wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True,
@@ -305,8 +328,48 @@ class SpendPage(Gtk.Stack):
         if self.get_visible_child_name() != name:
             self.set_visible_child_name(name)
 
+    # ── days: the store's 14, then the older ones fetched on demand ──
+    def _fetch_older(self) -> list:
+        store_days = self.store.state.spend.days
+        fetch = getattr(self.actions, "spend_days", None)
+        if not self._older_count or not store_days or not callable(fetch):
+            return []
+        oldest = store_days[-1].date
+        try:
+            got = fetch(self._older_count, date.fromisoformat(oldest) - timedelta(days=1))
+            older = [d for d in got if d.date < oldest] if isinstance(got, list) else None
+        except Exception:  # noqa: BLE001 — a page must not die on a service error
+            log.exception("spend_days failed")
+            older = None
+        if older is None:               # not supported here, or failed: stop offering
+            self._older_exhausted = True
+            return []
+        if len(older) < self._older_count:
+            self._older_exhausted = True
+        return older
+
+    def _days(self) -> list:
+        st = self.store.state.spend
+        key = (st.days[-1].date if st.days else None, self._older_count, st.updated_at)
+        if key != self._older_key:
+            self._older_key = key
+            self._older = self._fetch_older()
+        return list(st.days) + self._older
+
+    def _sync_older_button(self, shown: int) -> None:
+        visible = (callable(getattr(self.actions, "spend_days", None))
+                   and not self._older_exhausted and shown < DAYS_KEPT)
+        if self.older_button.get_visible() != visible:
+            self.older_button.set_visible(visible)
+
+    def show_older_days(self) -> None:
+        """Append the next OLDER_STEP days below the list (SP-1001)."""
+        room = DAYS_KEPT - len(self.store.state.spend.days)
+        self._older_count = max(0, min(self._older_count + OLDER_STEP, room))
+        self._sync_days()
+
     def _sync_days(self) -> None:
-        days = self.store.state.spend.days
+        days = self._days()
         rows = m.day_rows(days)
         self._syncing = True
         try:
@@ -328,12 +391,13 @@ class SpendPage(Gtk.Stack):
             self._selected_date = days[idx].date
         finally:
             self._syncing = False
+        self._sync_older_button(len(days))
         self._update_receipt()
 
     def _on_row_selected(self, _box, row) -> None:
         if row is None or self._syncing:
             return
-        days = self.store.state.spend.days
+        days = self._days()
         idx = row.get_index()
         if 0 <= idx < len(days):
             self._selected_date = days[idx].date
@@ -343,7 +407,7 @@ class SpendPage(Gtk.Stack):
 
     def _update_receipt(self) -> None:
         st = self.store.state
-        days = st.spend.days
+        days = self._days()
         if not days:
             return
         day = days[m.pick_day(days, self._selected_date)]
@@ -362,7 +426,7 @@ class SpendPage(Gtk.Stack):
         """Select the day `iso`; if it isn't listed yet (first scan still
         running, or the day hasn't arrived), select it when it does."""
         self._routed = True
-        for i, d in enumerate(self.store.state.spend.days):
+        for i, d in enumerate(self._days()):
             if d.date == iso and i < len(self._rows):
                 self._pending_date = None
                 self._follow_today = i == 0

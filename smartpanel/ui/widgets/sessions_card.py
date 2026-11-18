@@ -22,6 +22,7 @@ from typing import Callable
 
 from smartpanel.state.model import PHASE_JOURNALING, PHASE_LAUNCHING, RUNNING, WAITING
 from smartpanel.ui.widgets._gi import Adw, GLib, Gtk
+from gi.repository import Pango  # noqa: E402  (after _gi pins the GTK versions)
 from smartpanel.ui.widgets.labels import ActivityGlyph, Pill
 from smartpanel.ui.widgets.sessions_model import (WAITING_UNPARSED, display_state, has_prompt,
                                                   journal_steps, meta_parts, option_labels,
@@ -257,6 +258,11 @@ class CockpitCard(Gtk.Box):
             b = _button(label, (lambda i=i: self._on_answer(i, fp)),
                         css=("suggested-action",) if i == 0 else (),
                         tooltip=f"Answer “{full}”", a11y=f"Answer {i + 1}: {full}")
+            # The row wraps, so a button only shrinks (end-ellipsized) when it
+            # alone is wider than a very narrow card.
+            child = b.get_child()
+            if isinstance(child, Gtk.Label):
+                child.set_ellipsize(Pango.EllipsizeMode.END)
             self.answers.insert_child_after(b, self.answer_buttons[-1]
                                             if self.answer_buttons else None)
             self.answer_buttons.append(b)
