@@ -199,6 +199,14 @@ def test_hud_settings_keys_exist_with_contract_defaults():
     assert "DEFAULT_MARGIN = 30" in src
 
 
+def test_hud_schema_version_matches_the_service():
+    from smartpanel.dbus.service import SCHEMA_VERSION
+    src = (EXT / "hudmodel.js").read_text()
+    m = re.search(r"export const SCHEMA_VERSION = (\d+);", src)
+    assert m and int(m.group(1)) == SCHEMA_VERSION
+    assert "'Version'" in (EXT / "extension.js").read_text()
+
+
 def test_metadata():
     meta = json.loads((EXT / "metadata.json").read_text())
     assert meta["uuid"] == "smartpanel-hud@omdev.dev" == EXT.name
@@ -230,14 +238,39 @@ def test_install_script_syntax():
     subprocess.run(["bash", "-n", str(INSTALL)], check=True, timeout=10)
 
 
-@pytest.mark.skipif(shutil.which("gnome-extensions") is None,
-                    reason="gnome-extensions not installed")
+def _confined_install(tmp_path: Path, *args: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """Run install-hud.sh with HOME, PATH and the output dir confined to tmp_path.
+
+    `gnome-extensions` and `gnome-shell` are shims that only log their argv, so a
+    regression in the script's option parsing can never install the extension into
+    the real user's session. Returns the process and the logged gnome-extensions calls.
+    """
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    log = tmp_path / "calls.log"
+    (fakebin / "gnome-extensions").write_text(
+        f'#!/bin/sh\necho "$*" >> "{log}"\nexit 0\n')
+    (fakebin / "gnome-shell").write_text("#!/bin/sh\necho 'GNOME Shell 50.0'\n")
+    for shim in fakebin.iterdir():
+        shim.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"HOME": str(home), "PATH": f"{fakebin}:/usr/bin:/bin",
+           "SMARTPANEL_HUD_OUT": str(tmp_path / "dist")}
+    proc = subprocess.run([str(INSTALL), *args], capture_output=True, text=True,
+                          timeout=30, cwd=tmp_path, env=env)
+    calls = log.read_text().splitlines() if log.exists() else []
+    assert not (home / ".local" / "share" / "gnome-shell").exists()
+    return proc, calls
+
+
 def test_install_script_dry_run_changes_nothing(tmp_path):
     zip_path = ROOT / "dist" / "smartpanel-hud@omdev.dev.shell-extension.zip"
     before = zip_path.exists()
-    proc = subprocess.run([str(INSTALL), "--dry-run"], capture_output=True, text=True,
-                          timeout=30, cwd=tmp_path)
+    proc, calls = _confined_install(tmp_path, "--dry-run")
     assert proc.returncode == 0, proc.stderr
+    assert calls == [], "a dry run must not call gnome-extensions at all"
+    assert not (tmp_path / "dist").exists()
     out = proc.stdout
     assert "gnome-extensions pack" in out and "--extra-source=hudmodel.js" in out
     assert "--extra-source=throttle.js" in out
@@ -245,7 +278,26 @@ def test_install_script_dry_run_changes_nothing(tmp_path):
     assert "dry run" in out
     assert "Log out and back in" in out
     assert "gnome-extensions enable smartpanel-hud@omdev.dev" in out
+    assert "X11" not in out and "Alt+F2" not in out, "GNOME Shell 50 has no X11 session"
     assert zip_path.exists() == before, "dry run must not build anything"
+
+
+def test_install_script_never_enables_the_extension(tmp_path):
+    # The shim answers `info` with success, i.e. a re-install the shell already knows:
+    # exactly the case where the installer used to switch the HUD back on by itself.
+    proc, calls = _confined_install(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert any(c.startswith("pack ") for c in calls)
+    assert any(c.startswith("install --force ") for c in calls)
+    assert not any(c.split()[0] in {"enable", "info"} for c in calls), calls
+    assert "Enable it:" in proc.stdout
+
+
+def test_install_script_help_is_only_the_header(tmp_path):
+    proc, _ = _confined_install(tmp_path, "--help")
+    assert proc.returncode == 0
+    assert "set -euo" not in proc.stdout
+    assert "--dry-run" in proc.stdout
 
 
 def test_reference_tree_is_plain_json():

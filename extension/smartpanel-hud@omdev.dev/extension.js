@@ -11,7 +11,9 @@
 //   be restacked ABOVE the windows on the next sync, so it must live inside the group.)
 //   It is hidden with the windows in the overview and on the lock screen for free.
 // - Input: nothing is reactive, so clicks fall through to the desktop.
-// - Rate: GetState on name-appeared, then on `Changed` at most every 5 s (SP-2301);
+// - Version: on name-appeared the `Version` property is read first; a schema other
+//   than hudmodel.SCHEMA_VERSION shows "smartPanel version mismatch" and never fetches.
+// - Rate: GetState once the version is known good, then on `Changed` at most every 5 s (SP-2301);
 //   `settings` changes are fetched at once so the toggle feels instant.
 // - All formatting lives in hudmodel.js (pure, unit-tested); this file builds actors.
 
@@ -29,10 +31,12 @@ import {
     HUD_WIDTH,
     alignFor,
     buildHudModel,
+    buildMismatchModel,
     buildOfflineModel,
     hudSettings,
     modelKey,
     placeHud,
+    SCHEMA_VERSION,
 } from './hudmodel.js';
 import {RefreshThrottle} from './throttle.js';
 
@@ -188,7 +192,8 @@ export default class SmartPanelHudExtension extends Extension {
         this._view.actor.connect('notify::height', () => this._queueRelayout());
 
         this._settings = null;      // last hudSettings() we heard; null == never
-        this._online = false;
+        this._online = false;       // name owned AND its Version checked out
+        this._generation = 0;       // bumped per appear/vanish: drops stale Version replies
         this._cancellable = new Gio.Cancellable();
         this._throttle = new RefreshThrottle({
             fetch: done => this._fetch(done),
@@ -257,12 +262,38 @@ export default class SmartPanelHudExtension extends Extension {
     // ── D-Bus ──
 
     _onAppeared() {
-        this._online = true;
+        this._online = false;
         this._throttle.reset();
-        this._throttle.request({urgent: true});
+        const generation = ++this._generation;
+        Gio.DBus.session.call(BUS_NAME, OBJECT_PATH, 'org.freedesktop.DBus.Properties', 'Get',
+            new GLib.Variant('(ss)', [INTERFACE, 'Version']), new GLib.VariantType('(v)'),
+            Gio.DBusCallFlags.NO_AUTO_START, CALL_TIMEOUT_MS, this._cancellable,
+            (conn, res) => {
+                let version = null;
+                try {
+                    version = conn.call_finish(res).deepUnpack()[0].deepUnpack();
+                } catch (e) {
+                    if (e instanceof GLib.Error &&
+                        e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                        return;
+                    // Unreadable is not proof of a mismatch (a slow or busy service):
+                    // fetch anyway; a schema change would still show as a real Version.
+                    logger.warn(`smartpanel-hud: reading Version failed: ${e.message}`);
+                }
+                if (!this._view || !this._throttle || generation !== this._generation)
+                    return;
+                if (version !== null && version !== SCHEMA_VERSION) {
+                    logger.warn(`smartpanel-hud: service schema ${version}, HUD expects ${SCHEMA_VERSION}`);
+                    this._render(buildMismatchModel(this._settings));
+                    return;
+                }
+                this._online = true;
+                this._throttle.request({urgent: true});
+            });
     }
 
     _onVanished() {
+        this._generation++;
         this._online = false;
         this._throttle.reset();
         this._render(buildOfflineModel(this._settings));

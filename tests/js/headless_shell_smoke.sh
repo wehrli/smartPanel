@@ -18,6 +18,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UUID="smartpanel-hud@omdev.dev"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/hud-smoke-XXXXXX")"
 RT="$(mktemp -d /tmp/hrt-XXXXXX)"        # short: wayland socket paths are capped at 108 bytes
+# gnome-shell fills $RT (at-spi, dbus-1, dconf, gvfs, pulse...), so rmdir can't remove it.
+# $WORK stays: it holds the outputs printed below.
+trap 'rm -rf -- "$RT"' EXIT
 chmod 700 "$RT"
 OUT="$WORK/out"
 EXTDIR="$WORK/data/gnome-shell/extensions"
@@ -80,7 +83,8 @@ def on_call(conn, sender, path, iface, method, params, inv):
     log.write(f'{method} {params.unpack()}\n'); log.flush()
     inv.return_value(GLib.Variant('(s)', (json.dumps(state),)) if method == 'GetState' else None)
 Gio.bus_own_name(Gio.BusType.SESSION, 'dev.omdev.SmartPanel', 0,
-    lambda c, n: c.register_object('/dev/omdev/SmartPanel', node.interfaces[0], on_call, None, None), None, None)
+    lambda c, n: c.register_object('/dev/omdev/SmartPanel', node.interfaces[0], on_call,
+                                   lambda *a: GLib.Variant('u', 1), None), None, None)
 GLib.timeout_add_seconds($SERVICE_S, lambda: sys.exit(0))
 GLib.MainLoop().run()
 EOF
@@ -99,7 +103,6 @@ env -i PATH=/usr/bin:/bin HOME="$WORK/home" XDG_DATA_HOME="$WORK/data" \
     XDG_CONFIG_HOME="$WORK/config" XDG_CACHE_HOME="$WORK/cache" XDG_RUNTIME_DIR="$RT" \
     GSETTINGS_BACKEND=keyfile LANG=C.UTF-8 \
     timeout 40 dbus-run-session -- "$WORK/run.sh" >/dev/null 2>&1 || true
-rmdir "$RT" 2>/dev/null || true
 
 echo "GetState calls:"; cat "$OUT/calls.txt" 2>/dev/null || echo "  (none)"
 echo; cat "$OUT/tree.txt" 2>/dev/null || { echo "no tree dumped; see $OUT/shell.log"; exit 1; }

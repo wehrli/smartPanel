@@ -5,8 +5,10 @@ Claude sessions with their state, CPU / memory / swap / network, and a swap aler
 drawn on the wallpaper **behind every window**. GNOME Shell 50, ESM.
 
 - **Data:** the smartPanel app over D-Bus (`dev.omdev.SmartPanel`, `/dev/omdev/SmartPanel`,
-  `dev.omdev.SmartPanel1`). `GetState(['spend','sessions','system','settings','app'])`
-  when the name appears, then on `Changed` at most every 5 s. A change to `settings` is
+  `dev.omdev.SmartPanel1`). When the name appears it reads the `Version` property first;
+  a schema other than `SCHEMA_VERSION` in `hudmodel.js` shows a dim "smartPanel version
+  mismatch" and nothing is fetched. Otherwise `GetState(['spend','sessions','system','settings','app'])`
+  once, then on `Changed` at most every 5 s. A change to `settings` is
   fetched at once. When the name vanishes, the HUD shows a dim "smartPanel not running"
   if it was on.
 - **Settings (owned by the app):** `hud.enabled` (false), `hud.corner` (`top-right`,
@@ -31,5 +33,6 @@ drawn on the wallpaper **behind every window**. GNOME Shell 50, ESM.
 
 ## Install
 
-`scripts/install-hud.sh` runs pack and install. Then log out and back in (Wayland), run
+`scripts/install-hud.sh` runs pack and install; it never enables the extension, so
+re-running it leaves a HUD you switched off switched off. Then log out and back in (Wayland), run
 `gnome-extensions enable smartpanel-hud@omdev.dev`, and turn the HUD on in smartPanel.

@@ -2,7 +2,7 @@
 // Run: gjs -m tests/js/test_extension.js
 //
 // The extension's sources are copied to a temp dir (SMARTPANEL_HUD_TEST_TMP, else a
-// fresh GLib temp dir) with every shell/GI import rewritten to the fakes in ./stubs.
+// fresh GLib temp dir, removed again at the end) with every shell/GI import rewritten to the fakes in ./stubs.
 // Importing the copy is the syntax + link check (a typo'd named import fails here);
 // then the real enable()/disable() lifecycle is driven against a fake D-Bus service.
 //
@@ -45,8 +45,17 @@ function write(path, text) {
     GLib.file_set_contents(path, new TextEncoder().encode(text));
 }
 
+// Only a temp dir this script made itself is removed; SMARTPANEL_HUD_TEST_TMP belongs
+// to the caller (pytest's tmp_path).
+const OWN_TMP = GLib.getenv('SMARTPANEL_HUD_TEST_TMP') ? null : GLib.dir_make_tmp('smartpanel-hud-XXXXXX');
+
+function removeOwnTmp() {
+    if (OWN_TMP && OWN_TMP.includes('/smartpanel-hud-'))
+        GLib.spawn_sync(null, ['rm', '-rf', '--', OWN_TMP], null, GLib.SpawnFlags.SEARCH_PATH, null);
+}
+
 function stage() {
-    const base = GLib.getenv('SMARTPANEL_HUD_TEST_TMP') || GLib.dir_make_tmp('smartpanel-hud-XXXXXX');
+    const base = OWN_TMP ?? GLib.getenv('SMARTPANEL_HUD_TEST_TMP');
     const dir = `${base}/ext-${GLib.get_monotonic_time()}`;
     GLib.mkdir_with_parents(`${dir}/stubs`, 0o755);
     const unknown = [];
@@ -116,6 +125,14 @@ const texts = actor => {
     walk(actor);
     return out;
 };
+/** The name appears and the service answers the Version read with `version`. */
+const appear = (version = 1) => {
+    watch().appeared();
+    const get = fake().calls[0];
+    eq([get.iface, get.method, get.params.deepUnpack()],
+        ['org.freedesktop.DBus.Properties', 'Get', ['dev.omdev.SmartPanel1', 'Version']]);
+    get.replyVariant(new GLib.Variant('(v)', [new GLib.Variant('u', version)]));
+};
 const replyWith = name => {
     eq(fake().calls.length, 1, 'one GetState in flight');
     fake().calls[0].reply(fixtureJson(name));
@@ -173,7 +190,7 @@ test('enable: invisible actor on top of the wallpaper, watching the bus name', a
 test('name appears: GetState for the HUD sections, then the busy HUD is drawn top-right', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     const call = fake().calls[0];
     eq(call.method, 'GetState');
     eq(call.params.deepUnpack(), [['spend', 'sessions', 'system', 'settings', 'app']]);
@@ -198,7 +215,7 @@ test('name appears: GetState for the HUD sections, then the busy HUD is drawn to
 test('state words and swap carry their colour classes; nothing is reactive', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     replyWith('many');
     const labels = fake().actors.filter(x => x instanceof st.Label && !x.destroyed);
     const cls = t => labels.find(l => l.text === t)?.style_class;
@@ -220,7 +237,7 @@ test('state words and swap carry their colour classes; nothing is reactive', asy
 test('Changed is throttled to one GetState per 5 s; settings changes go out at once', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     replyWith('busy');
     fakeMod.advance(1000);
     changed(['system']);
@@ -240,7 +257,7 @@ test('Changed is throttled to one GetState per 5 s; settings changes go out at o
 test('hud.enabled false hides it and ignores non-settings changes; true shows it again (SP-2303)', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     replyWith('busy');
     changed(['settings']);
     replyWith('disabled');
@@ -258,7 +275,7 @@ test('hud.enabled false hides it and ignores non-settings changes; true shows it
 test('corner change re-places the HUD (SP-2304)', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     const s = readJson(`${FIX}/busy.json`);
     s.settings.values['hud.corner'] = 'top-left';
     s.settings.values['hud.margin'] = 10;
@@ -270,7 +287,7 @@ test('corner change re-places the HUD (SP-2304)', async () => {
 test('monitors-changed / workareas-changed re-layout on the primary monitor', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     replyWith('busy');
     const lm = mainMod.layoutManager;
     lm.workAreas = [{x: 0, y: 0, width: 1280, height: 1024}, {x: 1280, y: 27, width: 2560, height: 1413}];
@@ -293,7 +310,7 @@ test('monitors-changed / workareas-changed re-layout on the primary monitor', as
 test('header lines are letter-spaced markup (St does not measure CSS letter-spacing)', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     const s = readJson(`${FIX}/busy.json`);
     s.spend.tokens_today_human = '<b>&';           // must be escaped, not parsed
     fake().calls[0].reply(JSON.stringify(s));
@@ -309,7 +326,7 @@ test('header lines are letter-spaced markup (St does not measure CSS letter-spac
 test('a wide header line widens the HUD instead of being cut', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     replyWith('busy');
     eq(hud().width, 240);
     const s = readJson(`${FIX}/busy.json`);
@@ -326,12 +343,12 @@ test('a wide header line widens the HUD instead of being cut', async () => {
 test('name vanishes: dim "smartPanel not running" when it was on, nothing when off', async () => {
     await load();
     let ext = newExtension();
-    watch().appeared();
+    appear();
     replyWith('busy');
     watch().vanished();
     eq(texts(hud()), ['CLAUDE · TODAY', 'smartPanel not running']);
     // service comes back
-    watch().appeared();
+    appear();
     replyWith('busy');
     eq(texts(hud())[1], '23.84');
     ext.disable();
@@ -345,7 +362,7 @@ test('name vanishes: dim "smartPanel not running" when it was on, nothing when o
 test('Changed while vanished is ignored; a reply after vanish is dropped', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     const call = fake().calls[0];
     watch().vanished();
     call.reply(fixtureJson('busy'));
@@ -362,7 +379,7 @@ test('GetState errors are logged, never thrown; the throttle keeps working', asy
     const logged = [];
     mod.logger.warn = m => logged.push(String(m));
     try {
-        watch().appeared();
+        appear();
         fake().calls[0].fail(new GLib.Error(Gio.DBusError, Gio.DBusError.SERVICE_UNKNOWN, 'gone'));
         eq(logged.length, 1);
         changed(['settings']);
@@ -387,7 +404,7 @@ test('first GetState fails: a later Changed (any section) and a throttled retry 
     const warn = mod.logger.warn;
     mod.logger.warn = () => {};
     try {
-        watch().appeared();
+        appear();
         fake().calls[0].fail(new GLib.Error(Gio.IOErrorEnum, Gio.IOErrorEnum.TIMED_OUT, 'slow'));
         eq(fake().calls.length, 0, 'retry waits for the throttle window');
         // Changed for a non-settings section while settings are unknown is not dropped.
@@ -408,7 +425,7 @@ test('first GetState fails and no Changed arrives: retried after the interval', 
     const warn = mod.logger.warn;
     mod.logger.warn = () => {};
     try {
-        watch().appeared();
+        appear();
         fake().calls[0].fail(new GLib.Error(Gio.IOErrorEnum, Gio.IOErrorEnum.TIMED_OUT, 'slow'));
         fakeMod.advance(5000);
         eq(fake().calls.length, 1, 'retried without any signal');
@@ -420,10 +437,57 @@ test('first GetState fails and no Changed arrives: retried after the interval', 
     ext.disable();
 });
 
+test('Version is read before any GetState; a mismatch shows a dim note and never fetches', async () => {
+    await load();
+    const warn = mod.logger.warn;
+    const logged = [];
+    mod.logger.warn = m => logged.push(String(m));
+    try {
+        let ext = newExtension();
+        watch().appeared();
+        eq(fake().calls.map(c => c.method), ['Get'], 'only the Version read is in flight');
+        changed(['settings']);
+        eq(fake().calls.length, 1, 'no GetState before the version is known');
+        fake().calls[0].replyVariant(new GLib.Variant('(v)', [new GLib.Variant('u', 2)]));
+        eq(fake().calls.length, 0, 'mismatch: no GetState');
+        eq(hud().visible, true);
+        eq(texts(hud()), ['CLAUDE · TODAY', 'smartPanel version mismatch']);
+        changed(['settings']);
+        fakeMod.advance(10000);
+        eq(fake().calls.length, 0, 'Changed is ignored while mismatched');
+        ok(logged.some(m => m.includes('schema 2')));
+        // the service is replaced by a matching one
+        watch().vanished();
+        appear(1);
+        replyWith('busy');
+        eq(texts(hud())[1], '23.84');
+        ext.disable();
+
+        // Version unreadable: logged, then fetched anyway
+        ext = newExtension();
+        watch().appeared();
+        fake().calls[0].fail(new GLib.Error(Gio.IOErrorEnum, Gio.IOErrorEnum.TIMED_OUT, 'slow'));
+        replyWith('busy');
+        eq(hud().visible, true);
+        ext.disable();
+
+        // a Version reply that lands after the name vanished is dropped
+        ext = newExtension();
+        watch().appeared();
+        const stale = fake().calls[0];
+        watch().vanished();
+        stale.replyVariant(new GLib.Variant('(v)', [new GLib.Variant('u', 1)]));
+        eq(fake().calls.length, 0, 'stale Version reply does not start fetching');
+        ext.disable();
+    } finally {
+        mod.logger.warn = warn;
+    }
+});
+
 test('disable: everything torn down, late replies are harmless', async () => {
     await load();
     const ext = newExtension();
-    watch().appeared();
+    appear();
     replyWith('busy');
     fakeMod.advance(0);               // run the post-render idle relayout
     eq(fake().timers.size, 0);
@@ -444,10 +508,10 @@ test('disable: everything torn down, late replies are harmless', async () => {
     call.reply(fixtureJson('busy'));  // must not throw
     // and it can be enabled again (lock/unlock cycles disable+enable the extension)
     ext.enable();
-    watch().appeared();
+    appear();
     replyWith('busy');
     eq(hud().visible, true);
     ext.disable();
 });
 
-await run();
+await run({after: removeOwnTmp});

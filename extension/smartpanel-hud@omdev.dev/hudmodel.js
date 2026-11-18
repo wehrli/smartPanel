@@ -23,6 +23,11 @@ export const MAX_TITLE_CHARS = 60;          // St ellipsizes too; this caps path
 
 export const LABEL = 'Claude · today';      // shown upper-cased, as the CSS text-transform did
 export const OFFLINE_TEXT = 'smartPanel not running';
+export const MISMATCH_TEXT = 'smartPanel version mismatch';
+
+// The dev.omdev.SmartPanel1 `Version` property this HUD understands
+// (smartpanel/dbus/service.py SCHEMA_VERSION). Anything else: no GetState at all.
+export const SCHEMA_VERSION = 1;
 
 // Lifecycle phase wins over activity (prototype `state`), then the activity itself.
 // Order and words come from the prototype's ORDER and META tables.
@@ -223,6 +228,20 @@ export function buildHudModel(state) {
         metrics: metricRows(system),
         alert: alertLine(system),
         message: null,
+    };
+}
+
+/**
+ * The service speaks a schema this HUD doesn't know, so its JSON can't be trusted to
+ * mean what hudmodel.js reads. Say so (dim, like offline) instead of drawing defaults.
+ * Shown unless the user's last known hud.enabled was false: with the extension
+ * enabled and no settings ever heard, staying blank would hide the problem.
+ */
+export function buildMismatchModel(last = null) {
+    return {
+        ...buildOfflineModel(last),
+        visible: !(isObj(last) && last.enabled === false),
+        message: MISMATCH_TEXT,
     };
 }
 

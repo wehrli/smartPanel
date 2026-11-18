@@ -9,10 +9,12 @@ import {dirOf, eq, ok, readJson, run, test} from './harness.js';
 import {
     CORNERS,
     MAX_SESSION_ROWS,
+    MISMATCH_TEXT,
     OFFLINE_TEXT,
     STATE_WORDS,
     alignFor,
     buildHudModel,
+    buildMismatchModel,
     buildOfflineModel,
     displayTitle,
     humanTokens,
@@ -262,6 +264,13 @@ test('offline: dim note only when the HUD was on last time we heard', () => {
     eq(on.rows, []);
     eq(buildOfflineModel(null).visible, false);
     eq(buildOfflineModel({enabled: false}).visible, false);
+});
+
+test('version mismatch: dim note, shown unless the HUD was known to be off', () => {
+    const m = buildMismatchModel(null);
+    eq([m.visible, m.offline, m.message, m.rows, m.metrics], [true, true, MISMATCH_TEXT, [], []]);
+    eq(buildMismatchModel({enabled: true, corner: 'top-left', margin: 5}).corner, 'top-left');
+    eq(buildMismatchModel({enabled: false}).visible, false);
 });
 
 // ── placement (SP-2304) ──
