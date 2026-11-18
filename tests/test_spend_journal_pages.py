@@ -6,7 +6,7 @@ gi = pytest.importorskip("gi")
 try:
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
-    from gi.repository import Adw, Gdk, Gtk
+    from gi.repository import Adw, Gdk, Gtk, Pango
     _DISPLAY = Gtk.init_check() if hasattr(Gtk, "init_check") else True
     _DISPLAY = _DISPLAY and Gdk.Display.get_default() is not None
 except (ImportError, ValueError):  # pragma: no cover
@@ -186,6 +186,23 @@ def test_journal_lists_entries_and_selects_first():
     assert page._rows[0].badge.get_text() == "✓ JOURNALED"
     assert page.detail.dd["Duration"].get_text() == "2h30m"
     assert page.detail.open_log.get_child().get_text().startswith("Open JOURNAL/")
+
+
+def test_journal_open_buttons_wrap_instead_of_cutting_the_file_name():
+    # SP-1803: at the default 900 px window the detail card is ~375 px wide;
+    # 'Open JOURNAL/2026-11.md' must wrap below 'Open receipt', not be
+    # middle-ellipsized to 'Open JOURN…2026-11.md'.
+    _mod, _store, page = _journal()
+    btns = page.detail.buttons
+    label = page.detail.open_log.get_child()
+    assert label.get_text() == "Open JOURNAL/2026-11.md"
+    assert label.get_ellipsize() != Pango.EllipsizeMode.MIDDLE
+    one_line = btns.measure(Gtk.Orientation.VERTICAL, 2000)[1]
+    narrow = btns.measure(Gtk.Orientation.VERTICAL, 300)[1]
+    assert narrow > one_line                     # wrapped onto a second line
+    # each button still gets its whole label on that second line
+    log_natural = page.detail.open_log.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
+    assert log_natural <= 300
 
 
 def test_journal_route_selects_entry_and_failed_quote():
