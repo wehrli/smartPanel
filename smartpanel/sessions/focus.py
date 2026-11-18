@@ -15,7 +15,10 @@ is policy, not a missing package.
 So this is a ladder, tried in order, and it always ends somewhere useful:
 
 1. `SMARTPANEL_FOCUS_CMD` — an explicit escape hatch, with `{session}`,
-   `{title}` and `{name}` placeholders. Whatever works on your desktop wins.
+   `{title}` and `{name}` placeholders, run through `sh -c`. The values arrive
+   **already shell-quoted** (write `wmctrl -a {title}`, not `"{title}"`): the
+   title is Claude's conversation title, which anything printed in the pane can
+   set with an escape sequence, so it is never spliced in raw.
 2. **Window Calls** (`window-calls@domandoman.xyz`), the GNOME extension that
    re-exposes window listing and activation on D-Bus. Installing it is what
    makes true raise-in-place work on Wayland; without it step 2 is a no-op.
@@ -54,7 +57,8 @@ REATTACHED = "reattached"  # a fresh terminal took the session over
 FAILED = "failed"
 
 # Shell command run before anything else, if set. Placeholders: {session} (the
-# tmux session name), {title} / {name} (the window title the panel pushed).
+# tmux session name), {title} / {name} (the window title the panel pushed),
+# each substituted shell-quoted.
 FOCUS_CMD = os.environ.get("SMARTPANEL_FOCUS_CMD", "")
 # Set to 0/false to never replace a window when raising is impossible.
 REATTACH_ENABLED = os.environ.get("SMARTPANEL_FOCUS_REATTACH", "1").strip().lower() \
@@ -93,7 +97,7 @@ def focus_session(name: str, title: str = "", *, run: Runner = _run,
     """
     title = title or name
     for attempt in (_via_env_cmd, _via_window_calls, _via_x11):
-        if attempt(name, title, run):
+        if attempt(name, title, run, term):
             log.info("focused %s via %s", name, attempt.__name__)
             return RAISED
     allow = REATTACH_ENABLED if reattach is None else reattach
@@ -105,23 +109,28 @@ def focus_session(name: str, title: str = "", *, run: Runner = _run,
 
 # ---- the rungs ----
 
-def _via_env_cmd(name: str, title: str, run: Runner) -> bool:
+def _via_env_cmd(name: str, title: str, run: Runner, term: str = "") -> bool:
     if not FOCUS_CMD:
         return False
-    cmd = FOCUS_CMD.format(session=name, title=title, name=title)
+    q = shlex.quote
+    try:
+        cmd = FOCUS_CMD.format(session=q(name), title=q(title), name=q(title))
+    except (KeyError, IndexError, ValueError) as e:
+        log.warning("SMARTPANEL_FOCUS_CMD is not a valid template: %s", e)
+        return False
     rc, _, err = run(["sh", "-c", cmd])
     if rc != 0:
         log.debug("SMARTPANEL_FOCUS_CMD failed (rc=%d): %s", rc, err.strip())
     return rc == 0
 
 
-def _via_window_calls(name: str, title: str, run: Runner) -> bool:
+def _via_window_calls(name: str, title: str, run: Runner, term: str = "") -> bool:
     """GNOME's Window Calls extension: list windows, activate the matching id."""
     rc, out, _ = run(["gdbus", "call", *_WINDOW_CALLS,
                       "--method", "org.gnome.Shell.Extensions.Windows.List"])
     if rc != 0 or not out.strip():
         return False
-    win_id = pick_window(out, title)
+    win_id = pick_window(out, title, terminal=term or None)
     if win_id is None:
         return False
     rc, _, err = run(["gdbus", "call", *_WINDOW_CALLS,
@@ -132,7 +141,7 @@ def _via_window_calls(name: str, title: str, run: Runner) -> bool:
     return rc == 0
 
 
-def _via_x11(name: str, title: str, run: Runner) -> bool:
+def _via_x11(name: str, title: str, run: Runner, term: str = "") -> bool:
     """wmctrl / xdotool — only ever succeeds on X11 or for XWayland windows."""
     if shutil.which("wmctrl"):
         rc, _, _ = run(["wmctrl", "-a", title])
@@ -178,13 +187,34 @@ def _spawn(argv: list[str]) -> bool:
 
 # ---- pure helpers ----
 
-def pick_window(listing: str, title: str) -> int | None:
+# The dashboard's own windows. A session with no conversation title yet is
+# focused by its project name, which for this very project is "smartPanel", the
+# dashboard's window title.
+OWN_WM_CLASSES = frozenset({"dev.omdev.smartpanel", "smartpanel"})
+
+
+def _is_ours(w: dict, own_pid: int | None) -> bool:
+    if own_pid is not None and w.get("pid") == own_pid:
+        return True
+    return str(w.get("wm_class") or "").casefold() in OWN_WM_CLASSES
+
+
+def _is_terminal(w: dict, terminal: str) -> bool:
+    want = os.path.basename(terminal).casefold()
+    have = f"{w.get('wm_class') or ''} {w.get('wm_class_instance') or ''}".casefold()
+    return bool(want) and want in have
+
+
+def pick_window(listing: str, title: str, *, terminal: str | None = None,
+                own_pid: int | None = os.getpid()) -> int | None:
     """Best window id for `title` from Window Calls' JSON-in-a-GVariant output.
 
     `gdbus` wraps the extension's JSON in `('[{...}]',)`, so the payload is
     extracted by slicing to the outermost brackets rather than parsing GVariant.
     Exact title match wins; a substring match is the fallback, because the
-    terminal may decorate the title it was given.
+    terminal may decorate the title it was given. Our own windows never match.
+    With `terminal` set, the substring fallback only considers that terminal's
+    windows, so a short title like "api" can't raise a browser tab.
     """
     import json
     start, end = listing.find("["), listing.rfind("]")
@@ -202,10 +232,11 @@ def pick_window(listing: str, title: str) -> int | None:
         if not isinstance(w, dict):
             continue
         wid, wtitle = w.get("id"), (w.get("title") or "")
-        if not isinstance(wid, int):
+        if not isinstance(wid, int) or _is_ours(w, own_pid):
             continue
         if wtitle == title:
             exact = wid if exact is None else exact
-        elif title and title in wtitle and partial is None:
+        elif (title and title in wtitle and partial is None
+              and (terminal is None or _is_terminal(w, terminal))):
             partial = wid
     return exact if exact is not None else partial

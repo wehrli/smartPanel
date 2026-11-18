@@ -46,6 +46,7 @@ from smartpanel.uiformat import (
 log = logging.getLogger(__name__)
 
 DEFAULT_MIN_AGE_S = 120  # config default for sessions.min_age_s
+JOURNAL_OFF_REASON = "Journaling is off in Settings, so no journal."  # SP-1609
 
 
 def launch_default_uri(uri: str, done: Callable[[bool], None]) -> None:
@@ -159,7 +160,7 @@ class Controller:
     def _journal_reason(self, s: Session) -> str | None:
         """Why this session closes without a journal (SP-1609), or None if it gets one."""
         if not self._journal_on():
-            return ""
+            return JOURNAL_OFF_REASON
         if not s.created or self.clock() - s.created < self._min_age():
             return f"Open under {format_minutes(self._min_age())}, so no journal."
         return None
@@ -273,8 +274,27 @@ class Controller:
             self._close_now(s, "")
             return
         cwd = s.cwd or tmux.session_cwd(name, run=self.run)  # before any kill
+        shared = self._shared_cwds()
         self.sessions.begin_journal(name)
-        self._spawn(lambda: self._journal_worker([(s, cwd)]), "smartpanel-journal")
+        self._spawn(lambda: self._journal_worker([(s, cwd)], shared=shared),
+                    "smartpanel-journal")
+
+    def _shared_cwds(self) -> set[str]:
+        """Folders more than one known session runs in (SP-1602).
+
+        A transcript is found by cwd, so in these folders the newest `*.jsonl`
+        may be a sibling's, and the journal run must not trust it. Counted over
+        every session the panel knows, including ones closing in this same
+        batch: a sibling killed a moment ago still owns the newest file.
+        """
+        seen: dict[str, set[str]] = {}
+        for s in self.store.state.sessions.items:
+            if s.cwd and s.phase != PHASE_LAUNCHING:
+                seen.setdefault(s.cwd, set()).add(s.name)
+        for name, cwd in self.sessions.cwds.items():
+            if cwd:
+                seen.setdefault(cwd, set()).add(name)
+        return {cwd for cwd, names in seen.items() if len(names) > 1}
 
     def _close_now(self, s: Session, reason: str | None) -> None:
         tmux.kill_session(s.name, run=self.run)
@@ -311,20 +331,25 @@ class Controller:
             self.store.toast("All sessions closed")
             return
         queue = [(s, s.cwd or tmux.session_cwd(s.name, run=self.run)) for s in worth]
+        shared = self._shared_cwds()
         self._closing_all = True
         self.store.update("sessions", close_all=Loading(done=len(young), total=len(items)))
-        for s, _ in queue:
-            self.sessions.begin_journal(s.name)
-        self._spawn(lambda: self._journal_worker(queue, close_all=True), "smartpanel-close-all")
+        with self.store.batch():  # one notification; begin_journal never asks tmux
+            for s, _ in queue:
+                self.sessions.begin_journal(s.name)
+            if young:
+                self.sessions.refresh()  # drop the rows just killed: one tmux sweep
+        self._spawn(lambda: self._journal_worker(queue, close_all=True, shared=shared),
+                    "smartpanel-close-all")
 
     def _journal_worker(self, queue: list[tuple[Session, str | None]],
-                        close_all: bool = False) -> None:
+                        close_all: bool = False, shared: set[str] = frozenset()) -> None:
         """Worker thread: journal each session in turn, then close it.
 
         Sequential on purpose — the skill appends to one shared monthly log, and
-        `_SKILL_LOCK` would serialize the runs anyway. Every guarantee of
-        `journal.write_journal_async` holds here too: `_once` around the kill,
-        and a `finally` backstop so a session is never stranded un-closable.
+        `_SKILL_LOCK` would serialize the runs anyway. `_once` around the kill
+        and a `finally` backstop mean a session is never stranded un-closable,
+        even when `run_journal` raises.
         """
         failures = 0
         for s, cwd in queue:
@@ -340,7 +365,7 @@ class Controller:
                     title=session_title(s),
                     on_progress=lambda step, n=name, **kw: self._post(
                         lambda: self.sessions.journal_progress(n, step, **kw)),
-                    journal_dir=self.journal_dir)
+                    journal_dir=self.journal_dir, ambiguous=bool(cwd and cwd in shared))
             except Exception:  # noqa: BLE001
                 log.exception("journal failed for %s", name)
             finally:

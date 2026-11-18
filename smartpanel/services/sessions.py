@@ -1,7 +1,10 @@
 """Session refresh: tmux -> the Store's `sessions` section (SP-1201..1204, 1304, 1401, 2605).
 
-Every 2 s on the GLib loop: one `list-sessions`, then one `capture-pane` per
-session (~2.4 ms each, a 4-session sweep measured 14 ms). That single capture
+Every 2 s: one `list-sessions`, then one `capture-pane` per session (~2.4 ms
+each, a 4-session sweep measured 14 ms). The timer runs those reads on a worker
+thread and applies the result on the loop (`_tick`); action paths call the
+synchronous `refresh()`. Panel-owned changes between ticks (journal phase and
+progress, cost) patch the listed rows without asking tmux. That single capture
 feeds all three readers — `activity.classify_pane`, `doing.describe_running`
 and `prompt.parse_prompt` — so adding the detail lines cost no extra tmux calls.
 
@@ -160,6 +163,8 @@ class SessionsService:
         self._cost_running = False
         self._cost_last = float("-inf")
         self._cost_pending = False
+        self._tick_running = False
+        self._generation = 0   # bumped by every applied read; stale worker reads are dropped
 
     # ── lifecycle ──
     def start(self) -> None:
@@ -185,7 +190,37 @@ class SessionsService:
             self._unsubscribe = None
 
     def _tick(self) -> bool:
-        self.refresh()  # never raises
+        """The 2 s refresh. The tmux reads (1 + N subprocesses) run on a worker
+        thread and only the Store write comes back to the loop, so the tick's
+        main-loop cost no longer grows with the number of sessions (SP-2702).
+        Never overlaps itself; never raises."""
+        if self.loop is None or not hasattr(self.loop, "thread"):
+            self.refresh()
+            return True
+        if self._tick_running:
+            return True
+        self._tick_running = True
+        gen = self._generation
+
+        def work() -> None:
+            snap = None
+            try:
+                snap = self._read()
+            except Exception:  # noqa: BLE001
+                log.exception("session read failed")
+
+            def apply() -> None:
+                self._tick_running = False
+                # An action refreshed meanwhile (a kill, a launch): this read
+                # predates it and would briefly resurrect what it changed.
+                if snap is not None and gen == self._generation:
+                    try:
+                        self._apply(*snap)
+                    except Exception:  # noqa: BLE001
+                        log.exception("session refresh failed")
+            self.loop.idle(apply)
+
+        self.loop.thread(work, "smartpanel-session-read")
         return True
 
     def _env_tick(self) -> bool:
@@ -226,14 +261,32 @@ class SessionsService:
             return False
 
     def _refresh(self) -> bool:
-        now = self.clock()
+        return self._apply(*self._read())
+
+    def _read(self) -> tuple[list[tmux.TmuxSession], dict[str, str], dict[str, str | None]]:
+        """Every tmux read a refresh needs: the list, one pane capture per
+        session, and the cwd of sessions not seen before. Touches no state, so
+        it can run on a worker thread."""
         live = tmux.list_sessions(run=self.run, hostname=self.hostname)
+        panes = {s.name: tmux.capture_pane(s.name, run=self.run) for s in live}
+        cwds = {s.name: self.cwds.get(s.name) or tmux.session_cwd(s.name, run=self.run)
+                for s in live}
+        return live, panes, cwds
+
+    def _apply(self, live: list[tmux.TmuxSession], panes: dict[str, str],
+               cwds: dict[str, str | None]) -> bool:
+        """Build the rows from a `_read()` and write them. Main loop only."""
+        self._generation += 1
+        now = self.clock()
         self.live = live
         names = {s.name for s in live}
+        for name, cwd in cwds.items():
+            if cwd:
+                self.cwds[name] = cwd  # a session never changes folder
 
         items: list[Session] = []
         for s in live:
-            items.append(self._session(s, now))
+            items.append(self._session(s, now, panes.get(s.name, "")))
 
         # Journaling sessions stay listed after the kill, until their outcome.
         for name, j in self.journaling.items():
@@ -256,14 +309,13 @@ class SessionsService:
         self.store.update("sessions", items=items, updated_at=now)
         return True
 
-    def _session(self, s: tmux.TmuxSession, now: float) -> Session:
-        pane = tmux.capture_pane(s.name, run=self.run)
+    def _session(self, s: tmux.TmuxSession, now: float, pane: str) -> Session:
         activity = classify_pane(pane)
         if activity == WAITING:
             self.waiting_since.setdefault(s.name, now)
         else:
             self.waiting_since.pop(s.name, None)
-        cwd = self.cwd(s.name)
+        cwd = self.cwds.get(s.name)
         doing = prompt = None
         try:
             if activity == RUNNING:
@@ -379,11 +431,32 @@ class SessionsService:
         self.launches = keep
         return rows
 
+    def _patch(self, changes: dict[str, dict]) -> bool:
+        """Rewrite fields of rows already in the Store, without asking tmux.
+
+        For panel-owned state (journal phase and progress, cost) that changes
+        between ticks: a full `refresh()` is 1 + N tmux calls on the main loop,
+        and these callers fire per session or per step. Returns False when a
+        named row isn't listed yet, so the caller can fall back to a refresh.
+        """
+        items = self.store.state.sessions.items
+        listed = {s.name for s in items}
+        out = [dataclasses.replace(s, **changes[s.name]) if s.name in changes else s
+               for s in items]
+        out = sort_sessions(out)
+        if out != items:
+            self.store.update("sessions", items=out)
+        return all(n in listed for n in changes)
+
     # ── journaling phase (SP-1601) ──
     def begin_journal(self, name: str) -> None:
+        """Flag `name` as journaling. No tmux calls, so Close all can flag every
+        session in one main-loop callback; the next tick re-reads tmux."""
         snap = self.find(name) or Session(name=name)
-        self.journaling[name] = _Journaling(JournalProgress(step=0), snap)
-        self.refresh()
+        j = self.journaling[name] = _Journaling(JournalProgress(step=0), snap)
+        if not self._patch({name: {"phase": PHASE_JOURNALING,
+                                   "journal": dataclasses.replace(j.progress)}}):
+            self.refresh()
 
     def journal_progress(self, name: str, step: int, *, headless: bool = False,
                          failed: bool = False) -> None:
@@ -393,7 +466,9 @@ class SessionsService:
         p = j.progress
         j.progress = JournalProgress(step=max(p.step, step), failed=p.failed or failed,
                                      outcome=p.outcome, headless=p.headless or headless)
-        self.refresh()
+        if not self._patch({name: {"phase": PHASE_JOURNALING,
+                                   "journal": dataclasses.replace(j.progress)}}):
+            self.refresh()
 
     def end_journal(self, name: str) -> None:
         self.journaling.pop(name, None)
@@ -427,10 +502,18 @@ class SessionsService:
         self.loop.thread(work, "smartpanel-session-cost")
 
     def _apply_costs(self, costs: dict[str, float | None]) -> None:
+        """Attach new costs to the listed rows. No tmux: the costs were computed
+        for `self.live`, and re-reading every pane just to add a number took
+        this callback past the 50 ms budget with four sessions (SP-2702)."""
         self._cost_running = False
         if costs != self.costs:
             self.costs = costs
-            self.refresh()
+            live = {s.name for s in self.live}
+            self._patch({s.name: {"cost_usd": costs.get(s.name)}
+                         for s in self.store.state.sessions.items if s.name in live})
+            for name, j in self.journaling.items():
+                if name in live:
+                    j.snapshot = dataclasses.replace(j.snapshot, cost_usd=costs.get(name))
         if self._cost_pending:
             self._cost_pending = False
             self.request_costs(force=True)

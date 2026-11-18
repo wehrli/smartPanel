@@ -101,6 +101,28 @@ def test_no_transcript_is_skill_failed_with_a_reason(monkeypatch, tmp_path):
     assert order == ["close"]
 
 
+def test_no_transcript_fails_on_the_first_step_not_the_skill_step(monkeypatch, tmp_path):
+    """Nothing was typed, so the checklist must not tick 'Type /journal'."""
+    monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
+    monkeypatch.setattr(journal, "find_transcript", lambda _c: None)
+    _, steps, _ = _run()
+    assert steps == [(0, False, False), (0, False, True)]
+
+
+def test_session_gone_before_typing_fails_where_the_headless_run_stopped(monkeypatch, tmp_path):
+    """Live never got to typing; the headless retry reached the skill and failed there."""
+    _setup(monkeypatch, tmp_path, (journal.LiveResult(journal.LIVE_UNAVAILABLE), [0]),
+           resume=None)
+    _, steps, _ = _run()
+    assert steps[-1] == (2, True, True)
+
+
+def test_never_journaling_fails_on_the_first_step(monkeypatch, tmp_path):
+    monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
+    _, steps, _ = _run(run_skill=False)
+    assert steps[-1] == (0, False, True)
+
+
 def test_receipt_front_matter(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path,
            (journal.LiveResult(journal.LIVE_OK, "Appended § webapp."), [0, 1, 2]))
@@ -135,22 +157,117 @@ def test_progress_callback_errors_do_not_stop_the_close(monkeypatch, tmp_path):
     assert order == ["close"] and r.outcome == "journaled"
 
 
-def test_async_reports_a_result_even_when_journaling_blows_up(monkeypatch, tmp_path):
-    monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "journals")
-    monkeypatch.setattr(journal, "find_transcript", lambda _c: Path("/t/sid.jsonl"))
+# ── two sessions in one folder (SP-1602) ──
 
-    def boom(*_a, **_k):
-        raise RuntimeError("tmux exploded")
+_IDLE = {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}
+_BUSY = {"type": "assistant", "message": {"content": [
+    {"type": "tool_use", "name": "Bash", "input": {"command": "npm test"}}]}}
 
-    monkeypatch.setattr(journal, "journal_in_session", boom)
-    closed, results, paths = [], [], []
-    done = threading.Event()
-    journal.write_journal_async(
-        "webapp", "/p", session_name="claude-webapp",
-        close_session=lambda: closed.append(1),
-        on_done=paths.append,
-        on_result=lambda r: (results.append(r), done.set()))
-    assert done.wait(5)
-    assert closed == [1]
-    assert results[0].outcome == "skill_failed" and results[0].path is None
-    assert paths == [None]
+
+def _shared_folder(monkeypatch, tmp_path):
+    """AAAA is the session being closed (idle); BBBB is a busier, newer sibling
+    in the same folder, so `find_transcript` (newest file) picks BBBB."""
+    import os
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(journal.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(journal, "JOURNAL_DIR", tmp_path / "receipts")
+    cwd = "/work/ledgerly"
+    proj = journal.project_dir_for_cwd(cwd)
+    proj.mkdir(parents=True)
+    a = proj / "AAAA.jsonl"
+    a.write_text(json.dumps(_IDLE) + "\n")
+    b = proj / "BBBB.jsonl"
+    b.write_text(json.dumps(_BUSY) + "\n")
+    os.utime(a, (1000, 1000))
+    os.utime(b, (2000, 2000))
+    assert journal.find_transcript(cwd) == b
+    sent, resumed = [], []
+    monkeypatch.setattr(journal.tmux, "has_session", lambda _n: True)
+    monkeypatch.setattr(journal.tmux, "send_text",
+                        lambda n, t: sent.append((n, t)) or True)
+    monkeypatch.setattr(journal.tmux, "send_enter", lambda _n: True)
+    monkeypatch.setattr(journal, "run_journal_skill",
+                        lambda sid, cwd, project=None: resumed.append(sid) or "ok")
+    return cwd, a, b, sent, resumed
+
+
+def _live_with(monkeypatch, **kw):
+    orig = journal.journal_in_session
+    monkeypatch.setattr(journal, "journal_in_session",
+                        lambda *a, **k: orig(*a, **{**k, **kw}))
+
+
+def test_shared_folder_journals_the_closing_sessions_own_transcript(monkeypatch, tmp_path):
+    cwd, a, b, sent, resumed = _shared_folder(monkeypatch, tmp_path)
+    monkeypatch.setattr(journal, "pane_idle", lambda _n: True)
+    appended = iter([
+        # Claude Code records the typed slash command like this.
+        {"type": "user", "message": {"content":
+            "<command-name>/journal</command-name>\n<command-args>ledgerly</command-args>"}},
+        _BUSY,
+        {"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "Appended § ledgerly."}]}},
+        {"type": "system", "subtype": "turn_duration"},
+    ])
+
+    def sleep(_s):
+        nxt = next(appended, None)
+        if nxt is not None:
+            with open(a, "a") as f:
+                f.write(json.dumps(nxt) + "\n")
+        with open(b, "a") as f:  # the sibling keeps working the whole time
+            f.write(json.dumps(_BUSY) + "\n")
+
+    _live_with(monkeypatch, sleep=sleep, idle_wait_s=1)
+    killed = []
+    r = journal.run_journal("ledgerly", cwd, 3000, True, "claude-ledgerly",
+                            lambda: killed.append(1), title="t", ambiguous=True)
+    assert sent == [("claude-ledgerly", "/journal ledgerly")]
+    assert resumed == [] and killed == [1]
+    assert r.outcome == "journaled" and r.confirmation == "Appended § ledgerly."
+    meta = yaml.safe_load(r.path.read_text().split("---\n")[1])
+    assert meta["session"] == "AAAA"
+
+
+def test_shared_folder_never_resumes_headlessly(monkeypatch, tmp_path):
+    """The live route can't start (busy pane): the old code killed the session
+    and ran `claude -p --resume BBBB` while BBBB was live — two writers."""
+    cwd, a, b, sent, resumed = _shared_folder(monkeypatch, tmp_path)
+    monkeypatch.setattr(journal, "pane_idle", lambda _n: False)
+    _live_with(monkeypatch, sleep=lambda _s: None, idle_wait_s=0)
+    killed = []
+    r = journal.run_journal("ledgerly", cwd, 3000, True, "claude-ledgerly",
+                            lambda: killed.append(1), title="t", ambiguous=True)
+    assert sent == [] and resumed == [] and killed == [1]
+    assert r.outcome == "skill_failed"
+    assert r.confirmation == journal.SHARED_CWD_CONFIRMATION
+    text = r.path.read_text()
+    assert "BBBB" not in text and "could not be told apart" in text
+
+
+def test_shared_folder_ignores_the_siblings_unrelated_growth(monkeypatch, tmp_path):
+    """Growth in BBBB is not proof the command landed in AAAA."""
+    cwd, a, b, sent, resumed = _shared_folder(monkeypatch, tmp_path)
+    monkeypatch.setattr(journal, "pane_idle", lambda _n: True)
+
+    def sleep(_s):
+        with open(b, "a") as f:
+            f.write(json.dumps(_IDLE) + "\n")
+
+    _live_with(monkeypatch, sleep=sleep, idle_wait_s=1, submit_wait_s=0)
+    r = journal.run_journal("ledgerly", cwd, 3000, True, "claude-ledgerly",
+                            lambda: None, title="t", ambiguous=True)
+    assert sent and resumed == []
+    assert r.outcome == "skill_failed"
+
+
+def test_mentions_prompt_matches_both_recorded_forms():
+    assert journal._mentions_prompt("/journal ledgerly", "/journal ledgerly")
+    assert journal._mentions_prompt(
+        "<command-message>journal</command-message>\n<command-name>/journal</command-name>\n"
+        "<command-args>ledgerly</command-args>", "/journal ledgerly")
+    assert not journal._mentions_prompt(
+        "<command-name>/journal</command-name>\n<command-args>webapp</command-args>",
+        "/journal ledgerly")
+    assert not journal._mentions_prompt("fix the journal", "/journal ledgerly")

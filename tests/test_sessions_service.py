@@ -280,3 +280,57 @@ def test_no_tmux_server_is_an_empty_list():
     s, store, tm, _ = make({})
     s.refresh()
     assert store.state.sessions.items == []
+
+
+def test_journal_progress_and_costs_do_not_ask_tmux():
+    """Both fire between ticks; a full refresh is 1 + N tmux calls on the loop."""
+    spend = FakeSpend({"/t/a.jsonl": 2.9})
+    s, store, tm, _ = make({"claude-a": FakeSession(cwd="/p/a"),
+                            "claude-b": FakeSession(created=5, cwd="/p/b")},
+                           spend=spend, find_transcript={"/p/a": Path("/t/a.jsonl")}.get)
+    s.refresh()
+    tm.calls.clear()
+    s.begin_journal("claude-b")
+    s.journal_progress("claude-b", 2)
+    s.request_costs()
+    assert tm.calls == []
+    rows = {x.name: x for x in store.state.sessions.items}
+    assert rows["claude-a"].cost_usd == 2.9
+    assert rows["claude-b"].phase == PHASE_JOURNALING and rows["claude-b"].journal.step == 2
+    assert names(store) == ["claude-b", "claude-a"]   # journaling sorts first
+    s.refresh()                                         # the next tick agrees
+    assert {x.name: x for x in store.state.sessions.items} == rows
+
+
+def test_tick_reads_tmux_on_a_worker_and_drops_a_stale_read():
+    s, store, tm, _ = make({"claude-a": FakeSession(), "claude-b": FakeSession(created=5)})
+    s.refresh()
+
+    class Deferred(FakeLoop):
+        def __init__(self):
+            super().__init__()
+            self.pending = []
+
+        def thread(self, fn, name="worker"):
+            self.threads.append(name)
+            self.pending.append(fn)
+
+    s.loop = Deferred()
+    tm.calls.clear()
+    assert s._tick() is True
+    assert tm.calls == []                                  # nothing on the loop
+    assert s._tick() is True and len(s.loop.pending) == 1  # never overlaps
+    del tm.sessions["claude-b"]
+    s.loop.pending.pop()()                                 # read + apply
+    assert names(store) == ["claude-a"] and not s._tick_running
+
+    # A read taken before an action's own refresh must not be applied after it.
+    stale = s._read()                                      # still lists claude-a
+    s._read = lambda: stale
+    s._tick()
+    work = s.loop.pending.pop()
+    del tm.sessions["claude-a"]
+    s._apply(*SessionsService._read(s))                    # e.g. the kill's refresh
+    assert names(store) == []
+    work()                                                 # applies `stale`: dropped
+    assert names(store) == [] and not s._tick_running

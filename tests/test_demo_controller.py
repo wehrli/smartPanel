@@ -95,7 +95,8 @@ def test_request_close_with_journaling_off():
     store, ctl, sched, rec = demo_controller(config=cfg)
     ctl.request_close(LEDGERLY)
     assert find(store, LEDGERLY) is None
-    assert rec.last_toast()["text"] == "Closed “Migrate goose 0023”."
+    assert rec.last_toast()["text"] == \
+        "Closed “Migrate goose 0023”. Journaling is off in Settings, so no journal."
 
 
 def test_min_age_comes_from_config():
@@ -398,6 +399,17 @@ def test_budget_follows_config():
     assert store.state.spend.forecast.budget_usd is None
     store, ctl, *_ = demo_controller(config=Config({"budget.daily_usd": 100}))
     assert store.state.spend.forecast.budget_usd == 100
+
+
+def test_settings_show_the_demo_budget():
+    """Overview says "$23.84 / $40.00"; Settings must not say "Off" beside it."""
+    cfg = Config()
+    store, ctl, *_ = demo_controller(config=cfg)
+    assert cfg.get("budget.daily_usd") == 40
+    assert store.state.settings.values["budget.daily_usd"] == 40
+    assert cfg.path is None                                # never written to disk
+    store, ctl, *_ = demo_controller("cold", config=Config())
+    assert store.state.settings.values["budget.daily_usd"] == 40
 
 
 def test_recheck_environment():

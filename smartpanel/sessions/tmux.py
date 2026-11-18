@@ -53,8 +53,8 @@ class TmuxSession:
     windows: int          # window count, 0 if unknown
     title: str = ""       # Claude's conversation title, "" until it has one
     # What the session is doing: see sessions/activity.py. Not filled by
-    # `list_sessions` — reading it costs one capture-pane per session, so
-    # callers opt in via `activity.annotate()`.
+    # `list_sessions` — reading it costs one capture-pane per session, which
+    # services/sessions.py does once per refresh for every reader.
     activity: str = "unknown"
 
     @property
@@ -206,15 +206,6 @@ def kill_session(name: str, run: Runner = _run) -> bool:
     if rc != 0:
         log.warning("failed to kill session %s: %s", name, err.strip())
     return rc == 0
-
-
-def kill_all(prefix: str = SESSION_PREFIX, run: Runner = _run) -> int:
-    """Kill every managed session. Returns the count successfully killed."""
-    killed = 0
-    for s in list_sessions(prefix=prefix, run=run):
-        if kill_session(s.name, run=run):
-            killed += 1
-    return killed
 
 
 def clean_title(raw: str, hostname: str = "") -> str:

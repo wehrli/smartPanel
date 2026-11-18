@@ -16,8 +16,8 @@ one file per session, named `<session-id>.jsonl`. On close we do two things:
    (or why it was skipped). No prose summary is generated here; the narrative
    is the skill's job.
 
-Both steps are slow, so callers use `write_journal_async`, which runs on a
-daemon thread off the GLib main loop.
+Both steps are slow: `run_journal` blocks for minutes, so the controller
+(`services/controller.py`) runs it on a worker thread off the GLib main loop.
 """
 from __future__ import annotations
 
@@ -239,6 +239,8 @@ class JournalResult:
 class LiveResult:
     status: str
     text: str | None = None
+    # The transcript the command was actually seen landing in, once known.
+    transcript: Path | None = None
 
     @property
     def ok(self) -> bool:
@@ -263,16 +265,40 @@ def classify_last_event(obj: dict | None) -> str:
         case "assistant":
             msg = obj.get("message")
             content = msg.get("content") if isinstance(msg, dict) else None
-            has_tool = any(b.get("type") == "tool_use" for b in _blocks(content))
-            return "working" if has_tool else "idle"
+            kinds = {b.get("type") for b in _blocks(content)}
+            if "tool_use" in kinds:
+                return "working"
+            # A thinking block is written as its own line ahead of the text
+            # that ends the turn, so a thinking-only tail is mid-turn.
+            return "working" if kinds == {"thinking"} else "idle"
         case "user":
             return "working"
         case _:
             return "unknown"
 
 
+def is_conversation_line(obj: dict) -> bool:
+    """Does this transcript line say anything about where the turn stands?
+
+    Only main-thread user/assistant messages do. Claude Code writes bookkeeping
+    after every turn (`system/turn_duration`, `tools-used`, `last-prompt`,
+    `ai-title`, `mode`, `cost-state`, `queue-operation`, `attachment`,
+    `api-request`, ...), so the literal last line of an idle session is almost
+    never the assistant's answer. Sidechain (subagent) lines and meta user
+    lines (expanded command bodies, caveats) are not turn boundaries either.
+    """
+    t = obj.get("type")
+    if t not in ("assistant", "user") or obj.get("isSidechain"):
+        return False
+    return not (t == "user" and obj.get("isMeta"))
+
+
 def tail_state(transcript: Path) -> tuple[int, str, str]:
     """(line count, idle/working, last assistant text) for a transcript.
+
+    The count covers every line (any growth means the session wrote
+    something); the state comes from the last *conversation* line only, see
+    `is_conversation_line`.
 
     Cheap enough to poll: these files are appended a line at a time and stay
     well inside the size where a full read costs less than the poll interval.
@@ -290,6 +316,8 @@ def tail_state(transcript: Path) -> tuple[int, str, str]:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(obj, dict) or not is_conversation_line(obj):
+                    continue
                 last_obj = obj
                 if obj.get("type") == "assistant":
                     msg = obj.get("message")
@@ -300,6 +328,57 @@ def tail_state(transcript: Path) -> tuple[int, str, str]:
         log.warning("cannot read transcript %s: %s", transcript, e)
         return 0, "unknown", ""
     return lines, classify_last_event(last_obj), last_text
+
+
+def pane_idle(session_name: str) -> bool:
+    """Is the session's TUI idle, read off its tmux pane (`activity`)?
+
+    The transcript can't answer this when several sessions share a folder:
+    the newest `*.jsonl` there may belong to a sibling.
+    """
+    from smartpanel.sessions.activity import IDLE, classify_pane
+    return classify_pane(tmux.capture_pane(session_name)) == IDLE
+
+
+def _mentions_prompt(text: str, prompt: str) -> bool:
+    """Does a user line's text carry `prompt`, typed verbatim or as Claude
+    Code records a slash command (`<command-name>/journal</command-name>
+    <command-args>ledgerly</command-args>`)?"""
+    if prompt in text:
+        return True
+    cmd, _, args = prompt.partition(" ")
+    if f"<command-name>{cmd}</command-name>" not in text:
+        return False
+    return not args or f"<command-args>{args}</command-args>" in text
+
+
+def typed_since(transcript: Path, skip: int, prompt: str) -> bool:
+    """Did a user line carrying `prompt` land after the first `skip` lines?
+
+    `skip` counts non-empty lines, as `tail_state` does.
+    """
+    seen = 0
+    try:
+        with open(transcript, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                seen += 1
+                if seen <= skip:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict) or obj.get("type") != "user":
+                    continue
+                msg = obj.get("message")
+                txt = _text_of(msg.get("content")) if isinstance(msg, dict) else ""
+                if txt and _mentions_prompt(txt, prompt):
+                    return True
+    except OSError:
+        return False
+    return False
 
 
 def _wait_until(predicate: Callable[[], bool], timeout_s: float,
@@ -320,12 +399,18 @@ def journal_in_session(session_name: str, transcript: Path,
                        idle_wait_s: float = LIVE_IDLE_WAIT_S,
                        submit_wait_s: float = LIVE_SUBMIT_WAIT_S,
                        sleep=time.sleep,
-                       progress: "Progress | None" = None) -> LiveResult:
+                       progress: "Progress | None" = None, *,
+                       ambiguous: bool = False) -> LiveResult:
     """Type the journal command into the live session and wait for the answer.
 
     Returns the skill's confirmation line on success. The caller kills the
     session only after this returns — that's the whole point of the live path.
     `progress(step)` is told when each of `state.JOURNAL_STEPS` 0-2 begins.
+
+    `ambiguous` means another session shares this folder, so `transcript` (the
+    newest file there) may be the sibling's: only its directory is trusted.
+    Idle is then read off the pane, and the session's own transcript is the
+    file in that directory where the typed command shows up.
     """
     report = progress or (lambda *_a, **_k: None)
     if not tmux.has_session(session_name):
@@ -334,14 +419,19 @@ def journal_in_session(session_name: str, transcript: Path,
 
     # 1. Don't interrupt a turn in progress: keys sent mid-turn just pile up in
     #    the input box and would be submitted along with whatever else is there.
-    if not _wait_until(lambda: tail_state(transcript)[1] == "idle",
-                       idle_wait_s, sleep=sleep):
+    idle = ((lambda: pane_idle(session_name)) if ambiguous
+            else (lambda: tail_state(transcript)[1] == "idle"))
+    if not _wait_until(idle, idle_wait_s, sleep=sleep):
         log.warning("session %s never went idle; not sending %s",
                     session_name, SKILL_COMMAND)
         return LiveResult(LIVE_UNAVAILABLE)
 
-    baseline, _, _ = tail_state(transcript)
     prompt = skill_prompt(project)
+    project_dir = transcript.parent
+    baselines = ({p: tail_state(p)[0] for p in project_dir.glob("*.jsonl")}
+                 if ambiguous else {transcript: tail_state(transcript)[0]})
+    mine: Path | None = None if ambiguous else transcript
+    baseline = 0 if ambiguous else baselines[transcript]
     report(STEP_TYPE)
     log.info("sending %r to session %s", prompt, session_name)
     if not tmux.send_text(session_name, prompt):
@@ -354,7 +444,15 @@ def journal_in_session(session_name: str, transcript: Path,
     #    first Enter (accepting the completion instead of submitting), so nudge
     #    once before concluding nothing happened.
     def submitted() -> bool:
-        return tail_state(transcript)[0] > baseline
+        nonlocal mine, baseline
+        if not ambiguous:
+            return tail_state(transcript)[0] > baseline
+        for p in project_dir.glob("*.jsonl"):
+            base = baselines.get(p, 0)  # a file created since counts from 0
+            if typed_since(p, base, prompt):
+                mine, baseline = p, base
+                return True
+        return False
 
     if not _wait_until(submitted, submit_wait_s / 2, sleep=sleep):
         log.info("no transcript growth yet; nudging Enter in %s", session_name)
@@ -367,16 +465,19 @@ def journal_in_session(session_name: str, transcript: Path,
     # 3. The command is in, so from here we must never fall back to --resume:
     #    a second run would duplicate the entry in the shared monthly log.
     report(STEP_SKILL)
+    if mine is None:  # unreachable: submitted() sets it before returning True
+        return LiveResult(LIVE_NOT_SUBMITTED)
+
     def finished() -> bool:
-        count, state, _ = tail_state(transcript)
+        count, state, _ = tail_state(mine)
         return count > baseline and state == "idle"
 
     if not _wait_until(finished, timeout_s, sleep=sleep):
         log.warning("%s did not finish in %ss in session %s",
                     SKILL_COMMAND, timeout_s, session_name)
-        return LiveResult(LIVE_TIMEOUT)
+        return LiveResult(LIVE_TIMEOUT, transcript=mine)
 
-    return LiveResult(LIVE_OK, tail_state(transcript)[2] or None)
+    return LiveResult(LIVE_OK, tail_state(mine)[2] or None, transcript=mine)
 
 
 # The skill appends to a single shared file (one per month), so concurrent runs
@@ -457,7 +558,8 @@ def _safe(name: str) -> str:
 
 def _render_markdown(project: str, cwd, transcript: Path | None, digest: Digest | None,
                      duration_s: float | None, when: datetime,
-                     skill_result: str | None) -> str:
+                     skill_result: str | None,
+                     no_digest_note: str = "No transcript found for this folder.") -> str:
     out = [f"# Session journal — {project}", ""]
     out.append(f"- **When:** {when:%Y-%m-%d %H:%M:%S}")
     out.append(f"- **Duration:** {_fmt_duration(duration_s)}")
@@ -474,7 +576,7 @@ def _render_markdown(project: str, cwd, transcript: Path | None, digest: Digest 
 
     out.append("## Activity")
     if digest is None:
-        out.append("_(No transcript found for this folder.)_")
+        out.append(f"_({no_digest_note})_")
         return "\n".join(out) + "\n"
 
     out.append(f"- Prompts: {len(digest.user_prompts)} · "
@@ -500,6 +602,9 @@ def _render_markdown(project: str, cwd, transcript: Path | None, digest: Digest 
 
 FAILED_CONFIRMATION = (f"The {SKILL_COMMAND} skill returned no confirmation line. The session "
                        "was still closed; this receipt holds the Activity section only.")
+SHARED_CWD_CONFIRMATION = (f"Several sessions share this folder and {SKILL_COMMAND} could not "
+                           "run in the live session, so no headless journal was attempted: "
+                           "resuming the newest transcript could journal the wrong conversation.")
 NO_TRANSCRIPT_CONFIRMATION = (f"No transcript was found for this folder, so {SKILL_COMMAND} "
                               "could not run.")
 
@@ -538,7 +643,8 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
                 session_name: str | None = None,
                 close_session: Callable[[], None] | None = None, *,
                 title: str = "", on_progress: Progress | None = None,
-                journal_dir: Path | None = None) -> JournalResult:
+                journal_dir: Path | None = None,
+                ambiguous: bool = False) -> JournalResult:
     """Journal the session rooted at `cwd`, then close it. Returns the outcome.
 
     Two routes to the same skill. If the tmux session is still alive we type the
@@ -551,12 +657,26 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
     taken; it is always invoked exactly once, even if journaling fails, so a
     session can never be left un-closable.
 
+    `ambiguous`: another session shares `cwd`, so the newest transcript there
+    may be a sibling's. Only the live route runs (it finds the right file by
+    where the typed command lands); the headless fallback, which can only
+    resume by cwd, is refused, and the receipt's Activity section is left out
+    unless the live run identified the transcript.
+
     `on_progress(step, headless=, failed=)` reports `state.JOURNAL_STEPS`
-    indexes, always increasing. A failed skill is reported once, on the skill
-    step, and the run then closes and writes the receipt without advancing the
-    step: the UI shows "failed, closing anyway" on the step that failed.
+    indexes, always increasing. A failure is reported once, on the furthest
+    step the run actually began (step 0 when there was no transcript to
+    journal, step 1 when the command never reached the session, otherwise the
+    skill step), and the run then closes and writes the receipt without
+    advancing: the UI shows "failed, closing anyway" on the step that failed
+    rather than ticking steps that never happened.
     """
+    reached = STEP_WAIT_IDLE
+
     def progress(step: int, **kw) -> None:
+        nonlocal reached
+        if not kw.get("failed"):
+            reached = max(reached, step)
         if on_progress is None:
             return
         try:
@@ -575,10 +695,14 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
     if run_skill and transcript and session_name:
         with _SKILL_LOCK:  # the skill appends to one shared monthly file
             live = journal_in_session(session_name, transcript, project,
-                                      progress=progress)
+                                      progress=progress, ambiguous=ambiguous)
         skill_result = live.text
         if live.ok:
             progress(STEP_CLOSE)
+    found = transcript
+    if ambiguous:
+        # The newest file is only a guess; trust what the live run saw.
+        transcript = live.transcript
 
     if close_session is not None:
         try:
@@ -589,7 +713,7 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
     # Only retry headlessly when we know the prompt never landed. After a
     # timeout the skill may still be running in there; a second pass would
     # append a duplicate entry.
-    if run_skill and transcript and live.retryable:
+    if run_skill and transcript and live.retryable and not ambiguous:
         headless = True
         progress(STEP_TYPE, headless=True)
         progress(STEP_SKILL, headless=True)
@@ -608,10 +732,14 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
         outcome, confirmation = OUTCOME_JOURNALED, (skill_result or "").strip()
     else:
         outcome, failed = OUTCOME_SKILL_FAILED, True
-        confirmation = (FAILED_CONFIRMATION if transcript or not run_skill
-                        else NO_TRANSCRIPT_CONFIRMATION)
+        if ambiguous and run_skill and session_name and found:
+            confirmation = SHARED_CWD_CONFIRMATION
+        elif transcript or not run_skill:
+            confirmation = FAILED_CONFIRMATION
+        else:
+            confirmation = NO_TRANSCRIPT_CONFIRMATION
     if failed:
-        progress(STEP_SKILL, headless=headless, failed=True)
+        progress(min(reached, STEP_SKILL), headless=headless, failed=True)
 
     # Condensed after the close so the receipt covers the whole session,
     # including the journal turn itself.
@@ -628,8 +756,12 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
             title=title, project=project, outcome=outcome, duration_s=duration_s,
             digest=digest, confirmation=confirmation, cwd=cwd, tmux_name=session_name)
         path.write_text(
-            header + _render_markdown(project, cwd, transcript, digest, duration_s,
-                                      when, skill_result),
+            header + _render_markdown(
+                project, cwd, transcript, digest, duration_s, when, skill_result,
+                no_digest_note=("Several sessions share this folder and this one's "
+                                "transcript could not be told apart."
+                                if ambiguous and found and not transcript
+                                else "No transcript found for this folder.")),
             encoding="utf-8",
         )
         log.info("wrote journal %s", path)
@@ -637,56 +769,3 @@ def run_journal(project: str, cwd: str | os.PathLike | None,
         log.warning("failed to write journal %s: %s", path, e)
         path = None
     return JournalResult(outcome, path, confirmation, headless)
-
-
-def write_journal(project: str, cwd: str | os.PathLike | None,
-                  duration_s: float | None = None, run_skill: bool = True,
-                  session_name: str | None = None,
-                  close_session: Callable[[], None] | None = None, *,
-                  title: str = "", on_progress: Progress | None = None) -> Path | None:
-    """`run_journal`, returning just the receipt's path (the original API)."""
-    return run_journal(project, cwd, duration_s, run_skill, session_name,
-                       close_session, title=title, on_progress=on_progress).path
-
-
-def write_journal_async(project: str, cwd: str | os.PathLike | None,
-                        duration_s: float | None = None, run_skill: bool = True,
-                        session_name: str | None = None,
-                        close_session: Callable[[], None] | None = None,
-                        on_done: Callable[[Path | None], None] | None = None, *,
-                        title: str = "", on_progress: Progress | None = None,
-                        on_result: Callable[[JournalResult], None] | None = None,
-                        journal_dir: Path | None = None) -> threading.Thread:
-    """Generate the journal on a daemon thread (the skill run is slow).
-
-    Callbacks run on that thread: GTK callers bounce them with GLib.idle_add.
-    `on_done(path)` is the original API; `on_result(JournalResult)` carries the
-    outcome and confirmation line as well. Both fire exactly once, even when
-    journaling blew up (then as `skill_failed` with no receipt path).
-    """
-    once = _once(close_session)
-
-    def run() -> None:
-        result = JournalResult(OUTCOME_SKILL_FAILED, None, FAILED_CONFIRMATION)
-        try:
-            result = run_journal(project, cwd, duration_s, run_skill, session_name,
-                                 once, title=title, on_progress=on_progress,
-                                 journal_dir=journal_dir)
-        except Exception as e:  # noqa: BLE001 — never let the worker thread die loudly
-            log.warning("journal generation failed for %s: %s", project, e)
-        finally:
-            # run_journal normally owns the close; if it raised before getting
-            # there the session would be stranded, so backstop it here. `_once`
-            # makes the second call a no-op.
-            once()
-        for cb, arg in ((on_done, result.path), (on_result, result)):
-            if cb is None:
-                continue
-            try:
-                cb(arg)
-            except Exception as e:  # noqa: BLE001
-                log.warning("journal callback failed for %s: %s", project, e)
-
-    t = threading.Thread(target=run, name="smartpanel-journal", daemon=True)
-    t.start()
-    return t

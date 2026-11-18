@@ -165,6 +165,16 @@ for _k in _app_knobs():
 
 
 @pytest.fixture(autouse=True)
+def _reload_timezone_after_each_test():
+    """Re-read TZ after every test (monkeypatch restores TZ but can't call tzset).
+
+    Set up before monkeypatch, so it tears down after it and sees the restored value.
+    """
+    yield
+    time.tzset()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_env(monkeypatch, tmp_path_factory):
     for k in _app_knobs():
         monkeypatch.delenv(k)
@@ -173,12 +183,3 @@ def _isolated_env(monkeypatch, tmp_path_factory):
     monkeypatch.setenv("XDG_STATE_HOME", str(xdg / "state"))
     yield
 
-
-@pytest.fixture(autouse=True)
-def _reload_timezone_after_each_test():
-    """Re-read TZ after every test (monkeypatch restores TZ but can't call tzset).
-
-    Set up before monkeypatch, so it tears down after it and sees the restored value.
-    """
-    yield
-    time.tzset()

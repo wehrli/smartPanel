@@ -30,6 +30,28 @@ def test_pick_window_falls_back_to_a_substring_match():
     assert pick_window(_listing(WINDOWS), "Mozilla") == 33
 
 
+def test_pick_window_never_picks_our_own_dashboard():
+    """A session with no title yet is focused by project name: for this project
+    that is "smartPanel", the dashboard window's own title."""
+    windows = [{"id": 11, "pid": 4242, "wm_class": "dev.omdev.SmartPanel",
+                "title": "smartPanel"},
+               {"id": 22, "pid": 999, "wm_class": "Terminator", "title": "smartPanel"}]
+    assert pick_window(_listing(windows), "smartPanel", own_pid=4242) == 22
+    windows[0]["wm_class"] = "python3"   # still ours by pid
+    assert pick_window(_listing(windows), "smartPanel", own_pid=4242) == 22
+    windows[0]["pid"] = 1                # still ours by wm_class
+    windows[0]["wm_class"] = "smartpanel"
+    assert pick_window(_listing(windows), "smartPanel", own_pid=4242) == 22
+
+
+def test_pick_window_substring_fallback_is_limited_to_the_terminal():
+    assert pick_window(_listing(WINDOWS), "Mozilla", terminal="terminator") is None
+    assert pick_window(_listing(WINDOWS), "smartPanel", terminal="terminator") == 22
+    # An exact title is trusted whatever the class.
+    assert pick_window(_listing(WINDOWS), "Panel work — smartPanel — Mozilla",
+                       terminal="terminator") == 33
+
+
 def test_pick_window_returns_none_when_nothing_matches():
     assert pick_window(_listing(WINDOWS), "nothing like this") is None
 
@@ -50,7 +72,31 @@ def test_env_command_short_circuits_the_ladder(monkeypatch):
         return 0, "", ""
 
     assert focus.focus_session("claude-x", "Fix login — x", run=run) == RAISED
-    assert seen == [["sh", "-c", "myfocus claude-x Fix login — x"]]
+    assert seen == [["sh", "-c", "myfocus claude-x 'Fix login — x'"]]
+
+
+def test_env_command_quotes_a_hostile_title(monkeypatch, tmp_path):
+    """The title comes from the pane title, which anything printed in the pane
+    can set (OSC 2). It must reach the command as one inert word."""
+    marker = tmp_path / "PWNED"
+    monkeypatch.setattr(focus, "FOCUS_CMD", "printf %s {title}")
+    title = f"Fix $(touch {marker}) `touch {marker}` ; touch {marker} — x"
+    out = []
+
+    def run(argv):
+        import subprocess
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+        out.append(p.stdout)
+        return p.returncode, p.stdout, p.stderr
+
+    focus._via_env_cmd("claude-x", title, run)
+    assert not marker.exists()
+    assert out == [title]
+
+
+def test_env_command_with_a_bad_template_is_skipped(monkeypatch):
+    monkeypatch.setattr(focus, "FOCUS_CMD", "focus {nope}")
+    assert focus._via_env_cmd("claude-x", "t", lambda argv: (0, "", "")) is False
 
 
 def test_window_calls_lists_then_activates(monkeypatch):
