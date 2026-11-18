@@ -1,7 +1,9 @@
 """SP-1205, SP-0203, SP-0302, SP-0104 (meter), SP-1905: the wide PNG bar icon."""
 from __future__ import annotations
 
+import os
 import struct
+import subprocess
 
 import cairo
 import pytest
@@ -172,24 +174,34 @@ def test_writer_names_by_content_and_reuses(tmp_path):
     w = IconWriter(tmp_path)
     a = IconSpec(strip=("idle",))
     p1 = w.write(a)
-    assert p1.name.startswith("bar-") and p1.suffix == ".png" and p1.parent == tmp_path
+    assert p1.name.startswith(f"bar-{os.getpid()}-") and p1.suffix == ".png"
+    assert p1.parent == tmp_path
     assert w.write(a) == p1
     w2 = IconWriter(tmp_path)
-    assert w2.write(a) == p1                     # same content -> same name
+    assert w2.write(a) == p1                     # same content, same owner -> same name
+
+
+def _dead_pid() -> int:
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return proc.pid
 
 
 def test_writer_deletes_stale_files_keeps_previous(tmp_path):
-    (tmp_path / "bar-leftover.png").write_bytes(b"old")
+    dead = _dead_pid()
+    (tmp_path / f"bar-{dead}-0123456789abcdef.png").write_bytes(b"old")
+    (tmp_path / "bar-0123456789abcdef.png").write_bytes(b"pid-less, older version")
     (tmp_path / "unrelated.txt").write_text("keep")
     w = IconWriter(tmp_path)
     p1 = w.write(IconSpec(strip=("idle",)))
-    assert not (tmp_path / "bar-leftover.png").exists()
+    assert not (tmp_path / f"bar-{dead}-0123456789abcdef.png").exists()
+    assert (tmp_path / "bar-0123456789abcdef.png").exists()
     p2 = w.write(IconSpec(strip=("running",)))
     p3 = w.write(IconSpec(strip=("waiting",)))
     assert p1 != p2 != p3
     assert not p1.exists() and p2.exists() and p3.exists()
     assert (tmp_path / "unrelated.txt").exists()
-    assert sorted(tmp_path.glob("bar-*.png")) == sorted([p2, p3])
+    assert sorted(tmp_path.glob(f"bar-{os.getpid()}-*.png")) == sorted([p2, p3])
 
 
 def test_writer_cleanup_all(tmp_path):
@@ -198,6 +210,20 @@ def test_writer_cleanup_all(tmp_path):
     w.cleanup(keep_none=True)
     assert list(tmp_path.glob("bar-*.png")) == []
     assert w.current is None
+
+
+def test_two_instances_never_delete_each_others_icons(tmp_path):
+    """Side-by-side runs (SMARTPANEL_APP_ID) share the runtime dir: each SNI's
+    IconName must survive the other instance's writes and its shutdown."""
+    a = IconWriter(tmp_path, owner=os.getpid())
+    b = IconWriter(tmp_path, owner=os.getppid())     # another live pid
+    a.write(IconSpec(strip=("idle",)))
+    for strip in (("running",), ("waiting",), ("idle", "idle")):
+        b.write(IconSpec(strip=strip))
+    assert a.current is not None and a.current.exists()
+    b.cleanup(keep_none=True)
+    assert a.current.exists()
+    assert list(tmp_path.glob(f"bar-{os.getppid()}-*.png")) == []
 
 
 def test_default_dir_under_runtime_dir(monkeypatch, tmp_path):

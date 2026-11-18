@@ -214,21 +214,47 @@ def default_dir() -> Path:
     return Path(tempfile.gettempdir()) / f"smartpanel-{os.getuid()}"
 
 
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:          # EPERM: exists, owned by someone else
+        return True
+    return True
+
+
 class IconWriter:
-    """Writes `bar-<hash>.png` files and deletes stale ones.
+    """Writes `bar-<pid>-<hash>.png` files and deletes its own stale ones.
+
+    The directory is shared by every instance of the user's panel (a side-by-side dev
+    run with `SMARTPANEL_APP_ID` uses the same `$XDG_RUNTIME_DIR/smartpanel`), and
+    each instance's SNI `IconName` points at a file in it. So an instance only ever
+    deletes files carrying its *own* pid, plus, once at start, files whose pid is no
+    longer running (leftovers of a crashed or earlier run). Files of a live instance,
+    and pid-less names from older versions, are never touched; the runtime dir is a
+    tmpfs cleared at logout.
 
     Keeps the current and the previous image: the shell may still be loading the
-    previous name when the next one is announced. Everything else matching
-    `bar-*.png` (including leftovers from an earlier run) is removed.
+    previous name when the next one is announced.
     """
     PREFIX = "bar-"
 
-    def __init__(self, directory: Path | str | None = None, scale: int = 1):
+    def __init__(self, directory: Path | str | None = None, scale: int = 1,
+                 owner: int | None = None):
         self.directory = Path(directory) if directory else default_dir()
         self.scale = scale
+        self.owner = os.getpid() if owner is None else owner
         self.current: Path | None = None
         self.previous: Path | None = None
         self._last_spec: IconSpec | None = None
+        self._swept = False
+
+    @property
+    def own_prefix(self) -> str:
+        return f"{self.PREFIX}{self.owner}-"
 
     def write(self, spec: IconSpec) -> Path:
         if spec == self._last_spec and self.current is not None and self.current.exists():
@@ -236,7 +262,10 @@ class IconWriter:
         data = render_png(spec, self.scale)
         digest = hashlib.sha1(data).hexdigest()[:16]
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        path = self.directory / f"{self.PREFIX}{digest}.png"
+        if not self._swept:
+            self._swept = True
+            self.sweep_dead()
+        path = self.directory / f"{self.own_prefix}{digest}.png"
         if not path.exists():
             tmp = path.with_suffix(".tmp")
             tmp.write_bytes(data)
@@ -247,17 +276,35 @@ class IconWriter:
         self.cleanup()
         return path
 
-    def cleanup(self, keep_none: bool = False) -> None:
-        keep = set() if keep_none else {p for p in (self.current, self.previous) if p}
+    def _glob(self, prefix: str):
         try:
-            for p in self.directory.glob(f"{self.PREFIX}*.png"):
-                if p not in keep:
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
+            return list(self.directory.glob(f"{prefix}*.png"))
         except OSError as e:
-            log.debug("bar icon cleanup failed: %s", e)
+            log.debug("bar icon listing failed: %s", e)
+            return []
+
+    def sweep_dead(self) -> None:
+        """Delete `bar-<pid>-*.png` whose pid is not running (never our own)."""
+        for p in self._glob(self.PREFIX):
+            parts = p.name[len(self.PREFIX):].split("-", 1)
+            if len(parts) != 2 or not parts[0].isdigit():
+                continue                 # pid-less (older version): not ours to judge
+            pid = int(parts[0])
+            if pid != self.owner and not _pid_alive(pid):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+    def cleanup(self, keep_none: bool = False) -> None:
+        """Delete this instance's files except the current and previous one (or all)."""
+        keep = set() if keep_none else {p for p in (self.current, self.previous) if p}
+        for p in self._glob(self.own_prefix):
+            if p not in keep:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
         if keep_none:
             self.current = self.previous = None
             self._last_spec = None
