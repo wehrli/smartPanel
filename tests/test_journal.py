@@ -239,6 +239,65 @@ def test_tail_state_reports_working_mid_turn(tmp_path):
     assert journal.tail_state(t)[1] == "working"
 
 
+# What Claude Code writes after a turn ends, in order, from a real transcript.
+_POST_TURN = [
+    {"type": "system", "subtype": "turn_duration", "durationMs": 5120, "isMeta": False},
+    {"type": "tools-used", "tools": ["Bash"]},
+    {"type": "last-prompt", "lastPrompt": "commit it"},
+    {"type": "ai-title", "aiTitle": "Fix login"},
+    {"type": "cost-state", "costUSD": 1.2},
+]
+
+
+def test_tail_state_sees_idle_through_post_turn_bookkeeping(tmp_path):
+    """Regression: the last line is cost-state, not the assistant's answer, so a
+    state keyed on the literal last line read every idle session as unknown."""
+    t = _transcript(tmp_path / "s.jsonl", [
+        {"type": "user", "message": {"content": "commit it"}},
+        {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "."}]}},
+        _idle("I committed and pushed."),
+        *_POST_TURN,
+    ])
+    assert journal.tail_state(t) == (8, "idle", "I committed and pushed.")
+
+
+def test_tail_state_ignores_sidechain_and_meta_lines(tmp_path):
+    t = _transcript(tmp_path / "s.jsonl", [
+        _idle("done"),
+        {"type": "user", "isMeta": True, "message": {"content": "<local-command-caveat>"}},
+        {**_working(), "isSidechain": True},
+        {"type": "system", "subtype": "away_summary"},
+    ])
+    assert journal.tail_state(t)[1] == "idle"
+
+
+def test_tail_state_thinking_only_tail_is_mid_turn(tmp_path):
+    t = _transcript(tmp_path / "s.jsonl", [
+        {"type": "user", "message": {"content": "go"}},
+        {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "."}]}},
+        {"type": "api-request"},
+    ])
+    assert journal.tail_state(t)[1] == "working"
+
+
+def test_journal_in_session_works_on_a_current_transcript(tmp_path, monkeypatch):
+    """Idle wait, submit and completion all survive the bookkeeping lines."""
+    t = _transcript(tmp_path / "sid.jsonl", [_idle("earlier answer"), *_POST_TURN])
+    sent: list = []
+    _fake_tmux(monkeypatch, sent)
+    step = _stepper(t, [
+        {"type": "user", "message": {"content": "/journal webapp"}},
+        {"type": "attachment"},
+        _working(),
+        _idle("Appended § webapp."),
+        *_POST_TURN,
+    ])
+    r = journal.journal_in_session("claude-webapp", t, "webapp", idle_wait_s=1,
+                                   sleep=step)
+    assert r.ok and r.text == "Appended § webapp."
+    assert ("text", "claude-webapp", "/journal webapp") in sent
+
+
 def _fake_tmux(monkeypatch, sent, alive=True, send_ok=True):
     monkeypatch.setattr(journal.tmux, "has_session", lambda _n: alive)
     monkeypatch.setattr(journal.tmux, "send_text",

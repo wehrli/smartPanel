@@ -263,16 +263,40 @@ def classify_last_event(obj: dict | None) -> str:
         case "assistant":
             msg = obj.get("message")
             content = msg.get("content") if isinstance(msg, dict) else None
-            has_tool = any(b.get("type") == "tool_use" for b in _blocks(content))
-            return "working" if has_tool else "idle"
+            kinds = {b.get("type") for b in _blocks(content)}
+            if "tool_use" in kinds:
+                return "working"
+            # A thinking block is written as its own line ahead of the text
+            # that ends the turn, so a thinking-only tail is mid-turn.
+            return "working" if kinds == {"thinking"} else "idle"
         case "user":
             return "working"
         case _:
             return "unknown"
 
 
+def is_conversation_line(obj: dict) -> bool:
+    """Does this transcript line say anything about where the turn stands?
+
+    Only main-thread user/assistant messages do. Claude Code writes bookkeeping
+    after every turn (`system/turn_duration`, `tools-used`, `last-prompt`,
+    `ai-title`, `mode`, `cost-state`, `queue-operation`, `attachment`,
+    `api-request`, ...), so the literal last line of an idle session is almost
+    never the assistant's answer. Sidechain (subagent) lines and meta user
+    lines (expanded command bodies, caveats) are not turn boundaries either.
+    """
+    t = obj.get("type")
+    if t not in ("assistant", "user") or obj.get("isSidechain"):
+        return False
+    return not (t == "user" and obj.get("isMeta"))
+
+
 def tail_state(transcript: Path) -> tuple[int, str, str]:
     """(line count, idle/working, last assistant text) for a transcript.
+
+    The count covers every line (any growth means the session wrote
+    something); the state comes from the last *conversation* line only, see
+    `is_conversation_line`.
 
     Cheap enough to poll: these files are appended a line at a time and stay
     well inside the size where a full read costs less than the poll interval.
@@ -289,6 +313,8 @@ def tail_state(transcript: Path) -> tuple[int, str, str]:
                 try:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict) or not is_conversation_line(obj):
                     continue
                 last_obj = obj
                 if obj.get("type") == "assistant":
