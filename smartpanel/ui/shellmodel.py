@@ -108,7 +108,11 @@ def nav_badge(page: str, state: PanelState) -> Badge | None:
     if page == "sessions":
         if not state.sessions.tmux_ok:
             return Badge("!", "red", "tmux is not installed")
-        n = state.sessions.count(WAITING)
+        # Phase first, like the strip and the cards: a waiting session that is
+        # being journaled (or launched) shows as that, so it doesn't need you.
+        n = sum(1 for s in state.sessions.items
+                if s.phase not in (PHASE_LAUNCHING, PHASE_JOURNALING)
+                and s.activity == WAITING)
         if n:
             return Badge(str(n), "amber",
                          f"{n} session{'s' if n != 1 else ''} need{'s' if n == 1 else ''} you")
@@ -132,12 +136,17 @@ class BannerModel:
     headline: str
     text: str          # full sentence including the headline
     show_action: bool  # 'Open System' button
+    title: str = ""    # what the banner shows; the full text minus the advice when
+    #                    the button needs the room (the advice becomes the tooltip)
 
 
 def _gb(v: float | None) -> str:
     if v is None:
         return "?"
     return f"{v:.0f}" if abs(v - round(v)) < 0.05 else f"{v:.1f}"
+
+
+BANNER_ADVICE = "Close something heavy before the system stalls."
 
 
 def swap_banner(state: PanelState, page: str) -> BannerModel | None:
@@ -150,10 +159,14 @@ def swap_banner(state: PanelState, page: str) -> BannerModel | None:
     size = ""
     if swap.used_gb is not None and swap.total_gb:
         size = f" ({swap.used_gb:.1f} of {_gb(swap.total_gb)} GB)"
-    text = (f"{headline} · {swap.percent:.0f}% used{size}. "
-            f"Close something heavy before the system stalls.")
+    short = f"{headline} · {swap.percent:.0f}% used{size}"
+    text = f"{short}. {BANNER_ADVICE}"
+    show_action = page != "system"
+    # Adw.Banner moves its button onto a second row as soon as the title doesn't
+    # fit beside it, which doubled the banner's height at 900 px. With the
+    # button shown, the advice moves to the tooltip.
     return BannerModel(LEVEL_CRITICAL if crit else LEVEL_WARNING, headline, text,
-                       show_action=(page != "system"))
+                       show_action=show_action, title=short if show_action else text)
 
 
 # ───────────────────────── sidebar footer ─────────────────────────
@@ -226,6 +239,8 @@ class ToastModel:
     timeout: int
     action_label: str | None
     action_page: str | None
+    action_focus: str | None = None  # session to focus too when the button is clicked
+    notified: bool = False           # a desktop notification already says this
 
 
 def toast_model(data: dict | None) -> ToastModel | None:
@@ -236,12 +251,13 @@ def toast_model(data: dict | None) -> ToastModel | None:
         return None
     error = bool(data.get("error"))
     action = data.get("action") or None
-    label = page = None
+    label = page = focus = None
     if isinstance(action, dict) and action.get("label"):
         label = str(action["label"])
         page = str(action.get("page") or "") or None
+        focus = str(action.get("focus") or "") or None
     return ToastModel(text, error, TOAST_ERROR_SECONDS if error else TOAST_SECONDS,
-                      label, page)
+                      label, page, focus, bool(data.get("notified")))
 
 
 # ───────────────────────── remembered window state ─────────────────────────

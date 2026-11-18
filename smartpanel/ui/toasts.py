@@ -1,7 +1,7 @@
 """Toast host (SP-2502): one toast at a time at the bottom of the window.
 
-Text, an optional action button that routes `{label, page}` to the window's
-`show_page`, an error style, auto-dismiss after 4 s (6 s for errors). A new toast
+Text, an optional action button that routes `{label, page, focus}` to the
+window's `show_page` (then `on_focus(session)` when the action names one), an error style, auto-dismiss after 4 s (6 s for errors). A new toast
 replaces the current one. The decisions are in `shellmodel.toast_model`.
 """
 from __future__ import annotations
@@ -23,9 +23,11 @@ ERROR_CLASS = "sp-toast-error"
 
 
 class ToastHost:
-    def __init__(self, overlay: Adw.ToastOverlay, show_page: Callable[[str], None]):
+    def __init__(self, overlay: Adw.ToastOverlay, show_page: Callable[[str], None],
+                 on_focus: Callable[[str], None] | None = None):
         self.overlay = overlay
         self._show_page = show_page
+        self._on_focus = on_focus
         self._current: Adw.Toast | None = None
         self.last: shellmodel.ToastModel | None = None
 
@@ -42,14 +44,22 @@ class ToastHost:
         toast.set_priority(Adw.ToastPriority.HIGH)
         if model.action_label:
             toast.set_button_label(model.action_label)
-            page = model.action_page
-            toast.connect("button-clicked", lambda *_: page and self._show_page(page))
+            toast.connect("button-clicked", lambda *_, m=model: self._clicked(m))
         (self.overlay.add_css_class if model.error else self.overlay.remove_css_class)(
             ERROR_CLASS)
         toast.connect("dismissed", self._on_dismissed)
         self._current = toast
         self.overlay.add_toast(toast)
         return toast
+
+    def _clicked(self, model: shellmodel.ToastModel) -> None:
+        if model.action_page:
+            self._show_page(model.action_page)
+        if model.action_focus and self._on_focus is not None:
+            try:
+                self._on_focus(model.action_focus)
+            except Exception:
+                log.exception("toast focus action failed")
 
     def dismiss(self) -> None:
         if self._current is not None:

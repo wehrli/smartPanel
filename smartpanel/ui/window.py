@@ -101,7 +101,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.split.connect("notify::collapsed", lambda sv, _p: sv.get_collapsed()
                            and self._page and sv.set_show_content(True))
 
-        self.toasts = ToastHost(self.toast_overlay, self.show_page)
+        self.toasts = ToastHost(self.toast_overlay, self.show_page,
+                                on_focus=self.actions.focus_session)
         self.dialogs = DialogHost(self)
         self._install_actions(app)
 
@@ -308,8 +309,9 @@ class MainWindow(Adw.ApplicationWindow):
         if model is None:
             self.banner.hide()
         else:
-            self.banner.show(model.text, model.level,
-                             "Open System" if model.show_action else None)
+            self.banner.show(model.title or model.text, model.level,
+                             "Open System" if model.show_action else None,
+                             tooltip=model.text)
 
     def _update_footer(self) -> bool:
         state = self.store.state

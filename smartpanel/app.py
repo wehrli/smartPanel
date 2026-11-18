@@ -361,7 +361,9 @@ class SmartPanelApp(Adw.Application):
         from smartpanel import notify
         from smartpanel.ui import shellmodel
         model = shellmodel.toast_model(data)
-        if model is not None:
+        # A toast that mirrors a desktop notification the sender already raised
+        # (journal written / failed) must not become a second bubble.
+        if model is not None and not model.notified:
             # Always "normal": GNOME pins "critical" bubbles until dismissed, and a
             # routine error toast must not become a sticky banner. (The swap
             # alert, which owns critical urgency, goes through collect/system.py.)

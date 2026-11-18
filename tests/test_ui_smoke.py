@@ -252,6 +252,18 @@ def test_toasts_replace_and_style_errors(shell):
     assert win.toasts.show({"text": ""}) is None
 
 
+def test_toast_action_focuses_the_named_session(shell):
+    win, _store, actions, _ = shell
+    t = win.toasts.show({"text": "Open the terminal to answer.",
+                         "action": {"label": "Open", "page": "sessions",
+                                    "focus": "claude-x"}})
+    t.emit("button-clicked")
+    assert win.page == "sessions"
+    assert ("focus_session", ("claude-x",)) in actions.calls
+    t.dismiss()
+    _drain()
+
+
 def test_keyboard_actions(shell):
     win, _store, actions, _ = shell
     win.activate_action("win.page", GLib.Variant("s", "journal"))
@@ -426,6 +438,10 @@ def test_app_routes_events_without_a_window(monkeypatch):
     app._on_event(Event("toast", {"text": "Install tmux first", "error": True}))
     assert sent[-1][0][1] == "Install tmux first"
     assert sent[-1][1]["urgency"] == "normal"
+    # A toast that mirrors a notification the sender already raised: no 2nd bubble.
+    n = len(sent)
+    app._on_event(Event("toast", {"text": "Journaled & closed", "notified": True}))
+    assert len(sent) == n
 
 
 def test_demo_wiring(monkeypatch, tmp_path):

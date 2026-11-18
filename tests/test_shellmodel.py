@@ -216,3 +216,32 @@ def test_window_state_save_failure_is_not_fatal(tmp_path):
 def test_window_state_path_honours_xdg(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     assert sm.window_state_path() == tmp_path / "smartpanel" / "window.json"
+
+
+# ── review fixes (w3/ui) ──
+def test_sessions_badge_skips_waiting_sessions_being_journaled_or_launched():
+    s = _state(waiting=2)
+    s.sessions.items[0].phase = PHASE_JOURNALING
+    b = sm.nav_badge("sessions", s)
+    assert (b.text, b.a11y) == ("1", "1 session needs you")
+    s.sessions.items[1].phase = PHASE_LAUNCHING
+    assert sm.nav_badge("sessions", s) is None
+
+
+def test_banner_title_drops_the_advice_when_the_button_needs_room():
+    s = _state(swap=88, level=LEVEL_CRITICAL)
+    s.system.swap.used_gb = 7.0
+    b = sm.swap_banner(s, "overview")
+    assert b.title == "Swap is critically full · 88% used (7.0 of 8 GB)"
+    assert b.text == b.title + ". " + sm.BANNER_ADVICE
+    # No button on System: the whole sentence fits, so it is the title.
+    assert sm.swap_banner(s, "system").title == b.text
+
+
+def test_toast_model_carries_focus_and_notified():
+    t = sm.toast_model({"text": "Open the terminal to answer.",
+                        "action": {"label": "Open", "page": "sessions",
+                                   "focus": "claude-x"}})
+    assert (t.action_page, t.action_focus, t.notified) == ("sessions", "claude-x", False)
+    assert sm.toast_model({"text": "x", "action": {"label": "View"}}).action_focus is None
+    assert sm.toast_model({"text": "Journaled", "notified": True}).notified
