@@ -63,7 +63,9 @@ def test_local_tz_none_uses_the_system_zone(tmp_path, monkeypatch):
         assert s.today.cost_usd == approx(COST["m2"] + COST["m4"] + COST["m3"])
         assert s.now.utcoffset() == timedelta(hours=1)
     finally:
-        monkeypatch.delenv("TZ")
+        # Restore the caller's TZ (not delete it) and re-read it: a bare delenv
+        # left libc on /etc/localtime while monkeypatch put TZ back in environ.
+        monkeypatch.undo()
         time.tzset()
 
 
