@@ -334,8 +334,11 @@ class Controller:
         shared = self._shared_cwds()
         self._closing_all = True
         self.store.update("sessions", close_all=Loading(done=len(young), total=len(items)))
-        for s, _ in queue:
-            self.sessions.begin_journal(s.name)
+        with self.store.batch():  # one notification; begin_journal never asks tmux
+            for s, _ in queue:
+                self.sessions.begin_journal(s.name)
+            if young:
+                self.sessions.refresh()  # drop the rows just killed: one tmux sweep
         self._spawn(lambda: self._journal_worker(queue, close_all=True, shared=shared),
                     "smartpanel-close-all")
 

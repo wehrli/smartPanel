@@ -498,3 +498,27 @@ def test_close_all_marks_a_shared_folder_ambiguous_for_both(tmp_path):
     hh.ctl.close_all()
     assert hh.ambiguous == {"claude-ledgerly": True, "claude-ledgerly-2": True,
                             "claude-webapp": False}
+
+
+def test_close_all_reads_tmux_once_not_once_per_session(tmp_path):
+    """Flagging N sessions used to run N full refreshes (N² tmux calls) in one
+    main-loop callback: 90 spawns for the `many` scenario's 9 sessions."""
+    sessions = {f"claude-p{i}": FakeSession(created=OLD, cwd=f"/home/u/dev/p{i}")
+                for i in range(9)}
+    sessions["claude-young"] = FakeSession(created=YOUNG, cwd="/home/u/dev/y")
+    hh = Harness(tmp_path, sessions)
+
+    class NoThread(FakeLoop):
+        def thread(self, fn, name=""):
+            pass  # keep the journal worker out of the count
+
+    hh.ctl.loop = NoThread()
+    hh.ctl.start()
+    hh.tmux.calls.clear()
+    hh.ctl.close_all()
+    caps = [c for c in hh.tmux.calls if c[0] == "capture-pane"]
+    lists = [c for c in hh.tmux.calls if c[0] == "list-sessions"]
+    assert len(lists) <= 1 and len(caps) <= len(sessions)
+    rows = {s.name: s for s in hh.store.state.sessions.items}
+    assert "claude-young" not in rows  # killed and gone in the same callback
+    assert all(rows[f"claude-p{i}"].phase == PHASE_JOURNALING for i in range(9))
