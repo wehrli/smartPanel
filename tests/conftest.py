@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -105,7 +106,21 @@ def pytest_configure(config):
         _stop()
 
 
+def _detach_session_bus() -> None:
+    """Our private bus is about to go away. GDBus's shared session connection has
+    exit-on-close set, so losing the bus would raise SIGTERM in pytest itself
+    (exit 143 after a green run, and the broadway daemon left behind)."""
+    gio = sys.modules.get("gi.repository.Gio")
+    if gio is None or "DBUS_SESSION_BUS_ADDRESS" not in _saved_env:
+        return
+    try:
+        gio.bus_get_sync(gio.BusType.SESSION, None).set_exit_on_close(False)
+    except Exception:  # noqa: BLE001 - no connection was ever made: nothing to detach
+        pass
+
+
 def _stop() -> None:
+    _detach_session_bus()
     for p in reversed(_procs):
         if p.poll() is None:
             p.terminate()
