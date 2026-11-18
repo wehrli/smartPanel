@@ -14,8 +14,10 @@ How it runs (SP-0801):
   it back with `idle_add`; only the main thread touches the Store.
 - The first scan reports `app.loading = Loading(done, total)` (files), throttled to
   4 updates a second (each one repaints the tray and the dashboard), and
-  clears it when the result lands (SP-2601). `app.first_run` is true while
-  `~/.claude/projects` is missing or holds no `*.jsonl` (SP-2603).
+  clears it when the result lands (SP-2601), with a "Read N transcripts" toast
+  (SP-2602) — that first result only, and not when there are no transcripts.
+  `app.first_run` is true while `~/.claude/projects` is missing or holds no
+  `*.jsonl` (SP-2603).
 - Budget: the forecast is recomputed on every result and whenever `budget.daily_usd`
   changes; 80 % / 100 % notifications fire once each per local day (SP-0902) when a
   budget is set and `notifications.budget` is on. A threshold crossed while
@@ -324,12 +326,16 @@ class SpendService:
         self._busy = False
         if not self._running:
             return      # stopped while the worker ran: nothing reaches the Store
+        was_first = not self._scanned
         self._scanned = True
         self._snapshot = snap
         self._file_costs = costs
         with self.store.batch():
             self.store.replace("spend", spend)
             self.store.update("app", loading=None, first_run=snap.files_total == 0)
+        if was_first and snap.files_total > 0:
+            # SP-2602: the cold scan's progress bar goes away; say it finished.
+            self.store.toast(f"Read {snap.files_total:,} transcripts")
         self._check_budget()
         self._rerun_if_asked()
 

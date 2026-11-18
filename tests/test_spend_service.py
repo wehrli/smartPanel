@@ -487,6 +487,53 @@ def test_progress_hand_offs_are_capped_at_four_a_second(tmp_path):
     assert seen[-1] == Loading(1000, 1000)
 
 
+# ── SP-2602: the cold scan announces that it finished ──
+
+def _toasts(store):
+    seen = []
+    store.on_event(lambda ev: ev.kind == "toast" and seen.append(ev.data["text"]))
+    return seen
+
+
+def test_cold_scan_result_toasts_the_transcript_count_once(tmp_path):
+    svc, store, _, sched, _, _ = make(tmp_path)
+    toasts = _toasts(store)
+    svc.start()
+    sched.settle()
+    assert toasts == ["Read 3 transcripts"]
+    svc.refresh_now()                    # warm scans stay quiet
+    sched.settle()
+    assert toasts == ["Read 3 transcripts"]
+
+
+def test_cold_scan_toast_formats_thousands(tmp_path):
+    from smartpanel.claude_stats.aggregator import Snapshot
+    svc, store, _, sched, _, _ = make(tmp_path)
+    toasts = _toasts(store)
+    svc._running = True
+    snap = Snapshot(files_total=1284)
+    svc._apply(snap, store.state.spend, {})
+    assert toasts == ["Read 1,284 transcripts"]
+
+
+def test_no_toast_when_there_are_no_transcripts(tmp_path):
+    svc, store, _, sched, _, _ = make(tmp_path, root=tmp_path / "missing")
+    toasts = _toasts(store)
+    svc.start()
+    sched.settle()
+    assert toasts == []
+
+
+def test_no_toast_when_the_service_stopped_before_the_result(tmp_path):
+    svc, store, _, sched, _, _ = make(tmp_path)
+    toasts = _toasts(store)
+    svc.start()
+    sched.run_threads()
+    svc.stop()
+    sched.pump()
+    assert toasts == []
+
+
 # ── SP-2702: the default scan runs in a child process ──
 
 def test_default_aggregator_is_the_out_of_process_scan_worker(tmp_path):
