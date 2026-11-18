@@ -5,6 +5,8 @@ API (fixed by the v2 contract):
     SpendService.session_cost(transcript_path) -> float | None   # cached per-file cost (E14)
 
 How it runs (SP-0801):
+- The scan itself runs in a child process (`claude_stats.scan_worker`, SP-2702);
+  the worker thread just waits on its pipe with the GIL released.
 - Every `INTERVAL_S` (15 s) a main-loop tick starts `Aggregator.refresh()` on a worker
   thread. Only one refresh is ever in flight; a tick that finds one running is skipped.
   `refresh_now()` while busy queues exactly one follow-up run instead.
@@ -12,8 +14,10 @@ How it runs (SP-0801):
   it back with `idle_add`; only the main thread touches the Store.
 - The first scan reports `app.loading = Loading(done, total)` (files), throttled to
   4 updates a second (each one repaints the tray and the dashboard), and
-  clears it when the result lands (SP-2601). `app.first_run` is true while
-  `~/.claude/projects` is missing or holds no `*.jsonl` (SP-2603).
+  clears it when the result lands (SP-2601), with a "Read N transcripts" toast
+  (SP-2602) — that first result only, and not when there are no transcripts.
+  `app.first_run` is true while `~/.claude/projects` is missing or holds no
+  `*.jsonl` (SP-2603).
 - Budget: the forecast is recomputed on every result and whenever `budget.daily_usd`
   changes; 80 % / 100 % notifications fire once each per local day (SP-0902) when a
   budget is set and `notifications.budget` is on. A threshold crossed while
@@ -37,6 +41,7 @@ from typing import Any, Callable
 from smartpanel.claude_stats.aggregator import Aggregator, Snapshot
 from smartpanel.claude_stats.budget import BudgetAlerts, budget_message
 from smartpanel.claude_stats.forecast import forecast
+from smartpanel.claude_stats.scan_worker import ScanWorker
 from smartpanel.claude_stats.spend_state import build_spend_state, days
 from smartpanel.state.model import Event, Loading
 
@@ -168,7 +173,9 @@ class SpendService:
                  monotonic: Callable[[], float] = time.monotonic):
         self.store, self.config = store, config
         self.claude_root = Path(claude_root) if claude_root else None
-        self._agg = aggregator or Aggregator(claude_root=self.claude_root)
+        # The default scans in a child process (SP-2702): a cold scan on a
+        # thread here would hold the GIL for seconds and stall the main loop.
+        self._agg = aggregator or ScanWorker(claude_root=self.claude_root)
         self._sched = scheduler
         self._notify = notifier or default_notifier
         self._interval = interval_s
@@ -196,6 +203,9 @@ class SpendService:
         if self._running:
             return
         self._running = True
+        reopen = getattr(self._agg, "open", None)
+        if callable(reopen):
+            reopen()
         sched = self._scheduler()
         self._timer = sched.timeout_add_seconds(self._interval, self._on_timer)
         subscribe = getattr(self.config, "subscribe", None)
@@ -211,6 +221,12 @@ class SpendService:
         if self._unsub_config is not None:
             self._unsub_config()
             self._unsub_config = None
+        close = getattr(self._agg, "close", None)
+        if callable(close):
+            try:
+                close()       # ends the scan process; a refresh in flight fails
+            except Exception:  # noqa: BLE001
+                log.debug("closing the scan worker failed", exc_info=True)
 
     def refresh_now(self) -> None:
         if self._busy:
@@ -310,12 +326,16 @@ class SpendService:
         self._busy = False
         if not self._running:
             return      # stopped while the worker ran: nothing reaches the Store
+        was_first = not self._scanned
         self._scanned = True
         self._snapshot = snap
         self._file_costs = costs
         with self.store.batch():
             self.store.replace("spend", spend)
             self.store.update("app", loading=None, first_run=snap.files_total == 0)
+        if was_first and snap.files_total > 0:
+            # SP-2602: the cold scan's progress bar goes away; say it finished.
+            self.store.toast(f"Read {snap.files_total:,} transcripts")
         self._check_budget()
         self._rerun_if_asked()
 
