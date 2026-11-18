@@ -291,7 +291,7 @@ class DemoController:
             self.store.toast(f"Closed “{title}”. Open under {_fmt_threshold(min_age)}, "
                              "so no journal.")
         else:
-            self.store.toast(f"Closed “{title}”.")
+            self.store.toast(f"Closed “{title}”. Journaling is off in Settings, so no journal.")
 
     def close_session(self, name: str, journal: bool) -> None:
         s = self._known(name)

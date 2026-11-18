@@ -95,7 +95,8 @@ def test_request_close_with_journaling_off():
     store, ctl, sched, rec = demo_controller(config=cfg)
     ctl.request_close(LEDGERLY)
     assert find(store, LEDGERLY) is None
-    assert rec.last_toast()["text"] == "Closed “Migrate goose 0023”."
+    assert rec.last_toast()["text"] == \
+        "Closed “Migrate goose 0023”. Journaling is off in Settings, so no journal."
 
 
 def test_min_age_comes_from_config():

@@ -182,7 +182,8 @@ def test_request_close_with_journaling_off(tmp_path):
     hh.ctl.start()
     hh.ctl.request_close("claude-webapp")
     assert hh.tmux.killed == ["claude-webapp"]
-    assert hh.toasts()[-1]["text"] == "Closed “webapp”."
+    assert hh.toasts()[-1]["text"] == \
+        "Closed “webapp”. Journaling is off in Settings, so no journal."
     assert hh.journal_calls == []
 
 

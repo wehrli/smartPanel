@@ -46,6 +46,7 @@ from smartpanel.uiformat import (
 log = logging.getLogger(__name__)
 
 DEFAULT_MIN_AGE_S = 120  # config default for sessions.min_age_s
+JOURNAL_OFF_REASON = "Journaling is off in Settings, so no journal."  # SP-1609
 
 
 def launch_default_uri(uri: str, done: Callable[[bool], None]) -> None:
@@ -159,7 +160,7 @@ class Controller:
     def _journal_reason(self, s: Session) -> str | None:
         """Why this session closes without a journal (SP-1609), or None if it gets one."""
         if not self._journal_on():
-            return ""
+            return JOURNAL_OFF_REASON
         if not s.created or self.clock() - s.created < self._min_age():
             return f"Open under {format_minutes(self._min_age())}, so no journal."
         return None
