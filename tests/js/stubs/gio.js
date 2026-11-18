@@ -36,6 +36,10 @@ const session = {
             fake.calls.splice(fake.calls.indexOf(entry), 1);
             finish({variant: new RealGLib.Variant('(s)', [json])});
         };
+        entry.replyVariant = variant => {
+            fake.calls.splice(fake.calls.indexOf(entry), 1);
+            finish({variant});
+        };
         entry.fail = error => {
             fake.calls.splice(fake.calls.indexOf(entry), 1);
             finish({error});
@@ -53,7 +57,7 @@ export default {
     BusType: {SESSION: 2},
     BusNameWatcherFlags: {NONE: 0},
     DBusSignalFlags: {NONE: 0},
-    DBusCallFlags: {NONE: 0},
+    DBusCallFlags: {NONE: 0, NO_AUTO_START: 1},
     IOErrorEnum: RealGio.IOErrorEnum,
     Cancellable,
     DBus: {session},

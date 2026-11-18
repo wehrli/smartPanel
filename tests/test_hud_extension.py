@@ -199,6 +199,14 @@ def test_hud_settings_keys_exist_with_contract_defaults():
     assert "DEFAULT_MARGIN = 30" in src
 
 
+def test_hud_schema_version_matches_the_service():
+    from smartpanel.dbus.service import SCHEMA_VERSION
+    src = (EXT / "hudmodel.js").read_text()
+    m = re.search(r"export const SCHEMA_VERSION = (\d+);", src)
+    assert m and int(m.group(1)) == SCHEMA_VERSION
+    assert "'Version'" in (EXT / "extension.js").read_text()
+
+
 def test_metadata():
     meta = json.loads((EXT / "metadata.json").read_text())
     assert meta["uuid"] == "smartpanel-hud@omdev.dev" == EXT.name

@@ -83,7 +83,8 @@ def on_call(conn, sender, path, iface, method, params, inv):
     log.write(f'{method} {params.unpack()}\n'); log.flush()
     inv.return_value(GLib.Variant('(s)', (json.dumps(state),)) if method == 'GetState' else None)
 Gio.bus_own_name(Gio.BusType.SESSION, 'dev.omdev.SmartPanel', 0,
-    lambda c, n: c.register_object('/dev/omdev/SmartPanel', node.interfaces[0], on_call, None, None), None, None)
+    lambda c, n: c.register_object('/dev/omdev/SmartPanel', node.interfaces[0], on_call,
+                                   lambda *a: GLib.Variant('u', 1), None), None, None)
 GLib.timeout_add_seconds($SERVICE_S, lambda: sys.exit(0))
 GLib.MainLoop().run()
 EOF
